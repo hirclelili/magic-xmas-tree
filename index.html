@@ -3,17 +3,18 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Interactive Frozen Christmas Tree - Fixed</title>
+    <title>Frozen Tree - Stable Fix</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Great+Vibes&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
 
     <style>
-      body { background-color: #020210; font-family: 'Cinzel', serif; margin: 0; overflow: hidden; }
-      .font-great-vibes { font-family: 'Great Vibes', cursive; }
-      .text-glow { text-shadow: 0 0 30px rgba(136, 204, 255, 0.8); }
+      body { background-color: #020210; margin: 0; overflow: hidden; }
       .spinner { animation: spin 1s linear infinite; }
       @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      canvas { display: block; }
+      /* 强制确保预览窗可见 */
+      #preview-container { z-index: 999 !important; }
     </style>
 
     <script type="importmap">
@@ -35,208 +36,143 @@
         import React, { useState, useRef, useEffect, useCallback } from 'react';
         import ReactDOM from 'react-dom/client';
         import * as THREE from 'three';
-        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
         import { FilesetResolver, HandLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
-
-        const CONFIG = {
-            colors: { bg: 0x020210, iceBlue: 0x88ccff, cyan: 0xccffff, white: 0xffffff, silver: 0xaaaaaa, stream: 0xffffff },
-            particles: { count: 1200, dustCount: 1500, treeHeight: 24, treeRadius: 8 },
-            camera: { z: 50, zScatter: 80 },
-            photos: { count: 8 }
-        };
 
         const InteractionMode = { TREE: 'TREE', SCATTER: 'SCATTER', FOCUS: 'FOCUS' };
 
-        // --- Optimized MediaPipe Hook ---
-        const useMediaPipe = ({ videoRef, canvasRef, onGestureChange, onLoaded }) => {
-            const handLandmarkerRef = useRef(null);
-            const lastVideoTimeRef = useRef(-1);
-            const [isInitialized, setIsInitialized] = useState(false);
-            const handPositionRef = useRef({ x: 0, y: 0 });
-            const isHandDetectedRef = useRef(false);
-
-            const predictWebcam = useCallback(() => {
-                const video = videoRef.current;
-                const canvas = canvasRef.current;
-                const handLandmarker = handLandmarkerRef.current;
-
-                if (!video || !canvas || !handLandmarker || video.readyState < 2) return;
-
-                if (video.currentTime !== lastVideoTimeRef.current) {
-                    lastVideoTimeRef.current = video.currentTime;
-                    const results = handLandmarker.detectForVideo(video, performance.now());
-                    
-                    const ctx = canvas.getContext('2d');
-                    if (ctx && video.videoWidth > 0) {
-                        ctx.save();
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                        ctx.scale(-1, 1);
-                        ctx.translate(-canvas.width, 0);
-                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                        
-                        if (results.landmarks && results.landmarks.length > 0) {
-                            isHandDetectedRef.current = true;
-                            const lm = results.landmarks[0];
-                            handPositionRef.current = { x: (lm[9].x - 0.5) * 2, y: (lm[9].y - 0.5) * 2 };
-                            
-                            const drawingUtils = new DrawingUtils(ctx);
-                            drawingUtils.drawLandmarks(lm, { color: '#00ffff', lineWidth: 1, radius: 2 });
-                            drawingUtils.drawConnectors(lm, HandLandmarker.HAND_CONNECTIONS, { color: '#ffffff', lineWidth: 1 });
-
-                            // Gesture logic
-                            const wrist = lm[0];
-                            const middle = lm[9];
-                            const handSize = Math.max(0.01, Math.hypot(wrist.x - middle.x, wrist.y - middle.y));
-                            const pinch = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / handSize;
-                            
-                            if (pinch < 0.5) onGestureChange(InteractionMode.FOCUS, true);
-                            else if (Math.hypot(lm[12].x - wrist.x, lm[12].y - wrist.y) / handSize > 1.2) onGestureChange(InteractionMode.SCATTER, true);
-                            else onGestureChange(InteractionMode.TREE, true);
-                        } else {
-                            isHandDetectedRef.current = false;
-                            onGestureChange(InteractionMode.TREE, false);
-                        }
-                        ctx.restore();
-                    }
-                }
-                requestAnimationFrame(predictWebcam);
-            }, [onGestureChange]);
-
-            useEffect(() => {
-                const initMP = async () => {
-                    try {
-                        console.log("Loading MediaPipe Assets...");
-                        const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm");
-                        const modelPath = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-                        
-                        handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
-                            baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
-                            runningMode: "VIDEO",
-                            numHands: 1
-                        });
-
-                        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
-                        if (videoRef.current) {
-                            videoRef.current.srcObject = stream;
-                            videoRef.current.onloadeddata = () => {
-                                canvasRef.current.width = videoRef.current.videoWidth;
-                                canvasRef.current.height = videoRef.current.videoHeight;
-                                setIsInitialized(true);
-                                onLoaded();
-                                console.log("Webcam & MediaPipe Ready");
-                            };
-                        }
-                    } catch (e) { console.error("MediaPipe Error:", e); }
-                };
-                initMP();
-            }, []);
-
-            useEffect(() => { if (isInitialized) predictWebcam(); }, [isInitialized, predictWebcam]);
-
-            return { gestureManager: { isHandDetected: () => isHandDetectedRef.current, getHandPosition: () => handPositionRef.current } };
-        };
-
-        // --- Three.js Logic (Simplified for stability) ---
-        class SceneController {
-            constructor(container) {
-                this.clock = new THREE.Clock();
-                this.scene = new THREE.Scene();
-                this.scene.background = new THREE.Color(CONFIG.colors.bg);
-                this.camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
-                this.camera.position.z = CONFIG.camera.z;
-                
-                this.renderer = new THREE.WebGLRenderer({ antialias: true });
-                this.renderer.setSize(container.clientWidth, container.clientHeight);
-                this.renderer.setPixelRatio(window.devicePixelRatio);
-                container.appendChild(this.renderer.domElement);
-
-                this.mainGroup = new THREE.Group();
-                this.scene.add(this.mainGroup);
-
-                // Simple Tree Construction
-                const geo = new THREE.IcosahedronGeometry(0.4, 0);
-                const mat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.iceBlue, emissive: 0x112244 });
-                this.particles = [];
-                for(let i=0; i<CONFIG.particles.count; i++) {
-                    const mesh = new THREE.Mesh(geo, mat);
-                    const t = Math.random();
-                    const y = (t * CONFIG.particles.treeHeight) - 12;
-                    const r = CONFIG.particles.treeRadius * (1 - t) + 1;
-                    const a = Math.random() * Math.PI * 2;
-                    mesh.position.set(Math.cos(a)*r, y, Math.sin(a)*r);
-                    this.mainGroup.add(mesh);
-                    this.particles.push({ mesh, origPos: mesh.position.clone() });
-                }
-
-                const light = new THREE.PointLight(0xffffff, 100);
-                light.position.set(10, 20, 10);
-                this.scene.add(light, new THREE.AmbientLight(0xffffff, 0.5));
-            }
-
-            animate(mode, gm) {
-                const dt = this.clock.getDelta();
-                this.mainGroup.rotation.y += 0.5 * dt;
-
-                if (mode === InteractionMode.SCATTER) {
-                    this.particles.forEach(p => {
-                        p.mesh.position.multiplyScalar(1.02);
-                        if (p.mesh.position.length() > 60) p.mesh.position.copy(p.origPos);
-                    });
-                } else {
-                    this.particles.forEach(p => p.mesh.position.lerp(p.origPos, 0.1));
-                }
-                this.renderer.render(this.scene, this.camera);
-            }
-        }
-
-        // --- React Components ---
         const App = () => {
             const [isLoading, setIsLoading] = useState(true);
             const [mode, setMode] = useState(InteractionMode.TREE);
             const [handDetected, setHandDetected] = useState(false);
-            const containerRef = useRef();
-            const videoRef = useRef();
-            const canvasRef = useRef();
-            const sceneRef = useRef();
+            
+            // 使用 Ref 保持实例，避免 Re-render 导致闪现
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+            const containerRef = useRef(null);
+            const handLandmarkerRef = useRef(null);
+            const sceneRef = useRef(null);
+            const isInitializing = useRef(false);
 
-            const { gestureManager } = useMediaPipe({
-                videoRef, canvasRef, 
-                onGestureChange: (m, d) => { setMode(m); setHandDetected(d); },
-                onLoaded: () => setIsLoading(false)
-            });
+            // 初始化 MediaPipe
+            const initMediaPipe = async () => {
+                if (isInitializing.current || handLandmarkerRef.current) return;
+                isInitializing.current = true;
 
+                try {
+                    const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm");
+                    handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+                        baseOptions: {
+                            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                            delegate: "GPU"
+                        },
+                        runningMode: "VIDEO",
+                        numHands: 1
+                    });
+
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                        videoRef.current.onloadedmetadata = () => {
+                            videoRef.current.play();
+                            canvasRef.current.width = videoRef.current.videoWidth;
+                            canvasRef.current.height = videoRef.current.videoHeight;
+                            setIsLoading(false);
+                            requestAnimationFrame(predictionLoop);
+                        };
+                    }
+                } catch (e) {
+                    console.error("Initialization Failed:", e);
+                }
+            };
+
+            // 预测循环
+            const predictionLoop = () => {
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+                const landmarker = handLandmarkerRef.current;
+
+                if (video && canvas && landmarker && video.readyState >= 2) {
+                    const results = landmarker.detectForVideo(video, performance.now());
+                    const ctx = canvas.getContext('2d');
+                    
+                    ctx.save();
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.scale(-1, 1);
+                    ctx.translate(-canvas.width, 0);
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                    if (results.landmarks && results.landmarks.length > 0) {
+                        setHandDetected(true);
+                        const lm = results.landmarks[0];
+                        new DrawingUtils(ctx).drawLandmarks(lm, { color: '#00ffff', radius: 2 });
+                        
+                        // 逻辑判定
+                        const dist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
+                        if (dist < 0.05) setMode(InteractionMode.FOCUS);
+                        else if (lm[12].y < lm[9].y - 0.1) setMode(InteractionMode.SCATTER);
+                        else setMode(InteractionMode.TREE);
+                    } else {
+                        setHandDetected(false);
+                        setMode(InteractionMode.TREE);
+                    }
+                    ctx.restore();
+                }
+                requestAnimationFrame(predictionLoop);
+            };
+
+            // 初始化 Three.js
             useEffect(() => {
                 if (!containerRef.current) return;
-                sceneRef.current = new SceneController(containerRef.current);
-                const loop = () => {
-                    if (sceneRef.current) sceneRef.current.animate(mode, gestureManager);
-                    requestAnimationFrame(loop);
+                
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+                const renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                containerRef.current.appendChild(renderer.domElement);
+
+                const geometry = new THREE.ConeGeometry(5, 20, 32);
+                const material = new THREE.MeshPhongMaterial({ color: 0x88ccff, wireframe: true });
+                const tree = new THREE.Mesh(geometry, material);
+                scene.add(tree);
+
+                const light = new THREE.DirectionalLight(0xffffff, 1);
+                light.position.set(5, 5, 5);
+                scene.add(light, new THREE.AmbientLight(0x404040));
+                camera.position.z = 40;
+
+                const animate = () => {
+                    requestAnimationFrame(animate);
+                    tree.rotation.y += 0.01;
+                    renderer.render(scene, camera);
                 };
-                loop();
+                animate();
+                
+                initMediaPipe();
+
+                return () => {
+                    renderer.dispose();
+                };
             }, []);
 
             return (
-                <div className="w-full h-screen relative bg-black">
+                <div className="relative w-screen h-screen bg-black">
                     {isLoading && (
-                        <div className="absolute inset-0 z-50 bg-[#020210] flex flex-col items-center justify-center">
+                        <div className="absolute inset-0 z-[100] bg-[#020210] flex flex-col items-center justify-center">
                             <div className="spinner w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full"></div>
-                            <p className="text-cyan-300 mt-4 tracking-widest">LOADING MAGIC...</p>
+                            <p className="mt-4 text-cyan-400 tracking-widest animate-pulse">WAKING UP THE MAGIC...</p>
                         </div>
                     )}
-                    
+
                     <div ref={containerRef} className="w-full h-full" />
-                    
-                    <div className="absolute top-10 w-full text-center pointer-events-none">
-                        <h1 className="text-6xl font-great-vibes text-cyan-100 text-glow">Frozen Wonderland</h1>
-                        <p className="text-cyan-400 mt-2 tracking-[0.3em] text-sm uppercase">
-                            {handDetected ? `Mode: ${mode}` : "Raise your hand to start"}
+
+                    <div className="absolute top-10 w-full text-center pointer-events-none z-10">
+                        <h1 className="text-6xl font-['Great_Vibes'] text-cyan-100 drop-shadow-2xl">Frozen Tree</h1>
+                        <p className="text-cyan-400 mt-2 uppercase tracking-[0.3em]">
+                            {handDetected ? `Status: ${mode}` : "Show your hand to the camera"}
                         </p>
                     </div>
 
-                    <div className="absolute bottom-8 right-8 w-48 h-36 bg-black border border-cyan-900 rounded-lg overflow-hidden shadow-2xl">
+                    <div id="preview-container" className="absolute bottom-5 right-5 w-48 h-36 border-2 border-cyan-500 rounded-lg overflow-hidden bg-black shadow-[0_0_20px_rgba(0,255,255,0.3)]">
                         <video ref={videoRef} className="hidden" playsInline muted />
                         <canvas ref={canvasRef} className="w-full h-full object-cover scale-x-[-1]" />
                     </div>
