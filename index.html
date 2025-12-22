@@ -224,6 +224,7 @@
 
         let instancedIce, instancedSnow, instancedFlake, instancedGlow, instancedDust;
         let dummy = new THREE.Object3D();
+        let hasUserUploadedPhotos = false;
 
         async function init() {
             initThree();
@@ -682,38 +683,49 @@
 
             if (result.landmarks && result.landmarks.length > 0) {
                 warningEl.style.display = 'none';
-
                 STATE.hand.detected = true;
                 const lm = result.landmarks[0];
-                STATE.hand.x = (lm[9].x - 0.5) * 2; 
+                STATE.hand.x = (lm[9].x - 0.5) * 2;
                 STATE.hand.y = (lm[9].y - 0.5) * 2;
 
-                const thumb = lm[4]; const index = lm[8]; const wrist = lm[0];
-                const pinchDist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
-                const tips = [lm[8], lm[12], lm[16], lm[20]];
-                let avgDist = 0;
-                tips.forEach(t => avgDist += Math.hypot(t.x - wrist.x, t.y - wrist.y));
-                avgDist /= 4;
+                const wrist = lm[0];
+                const fingertips = [lm[4], lm[8], lm[12], lm[16], lm[20]];
+                const palmCenter = lm[9];
 
-                if (pinchDist < 0.05) {
+                // Gesture for FOCUS: All fingers brought together near the palm center.
+                let focusDist = 0;
+                fingertips.forEach(tip => {
+                    focusDist += Math.hypot(tip.x - palmCenter.x, tip.y - palmCenter.y);
+                });
+                focusDist /= fingertips.length;
+
+                // Gesture for SCATTER: An open hand, fingers spread from the wrist.
+                const scatterTips = [lm[8], lm[12], lm[16], lm[20]]; // 4 main fingers
+                let scatterDist = 0;
+                scatterTips.forEach(tip => {
+                    scatterDist += Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
+                });
+                scatterDist /= scatterTips.length;
+
+                // Determine mode based on gestures
+                if (focusDist < 0.12) { // Threshold for "closed" hand
                     if (STATE.mode !== 'FOCUS') {
                         STATE.mode = 'FOCUS';
-                        const photos = photoParticles;
-                        if (photos.length) {
-                            STATE.focusTarget = photos[Math.floor(Math.random()*photos.length)].mesh;
+                        if (photoParticles.length > 0) {
+                            STATE.focusTarget = photoParticles[Math.floor(Math.random() * photoParticles.length)].mesh;
                         }
                     }
-                } else if (avgDist > 0.4) {
+                } else if (scatterDist > 0.4) { // Threshold for "open" hand
                     STATE.mode = 'SCATTER';
                     STATE.focusTarget = null;
-                } else {
+                } else { // Default state
                     STATE.mode = 'TREE';
                     STATE.focusTarget = null;
                 }
+
             } else {
                 warningEl.style.display = 'block';
                 STATE.hand.detected = false;
-                
                 if (STATE.mode !== 'TREE') {
                     STATE.mode = 'TREE';
                     STATE.focusTarget = null;
@@ -734,22 +746,86 @@
             const fileInput = document.getElementById('file-input');
             fileInput.addEventListener('change', (e) => {
                 const files = e.target.files;
-                if (!files.length) return;
-                
-                for (let i = photoParticles.length - 1; i >= 0; i--) {
-                    photoMeshGroup.remove(photoParticles[i].mesh);
+                if (!files || !files.length) return;
+
+                if (!hasUserUploadedPhotos) {
+                    // Clear default placeholder photos only on the first user upload
+                    for (let i = photoParticles.length - 1; i >= 0; i--) {
+                        const p = photoParticles[i];
+                        if (p.mesh) {
+                            p.mesh.traverse((child) => {
+                                if (child.isMesh) {
+                                    child.geometry.dispose();
+                                    if (child.material.map) child.material.map.dispose();
+                                    child.material.dispose();
+                                }
+                            });
+                            photoMeshGroup.remove(p.mesh);
+                        }
+                    }
+                    photoParticles.length = 0; // Clear the array
+                    hasUserUploadedPhotos = true;
                 }
-                photoParticles = [];
 
                 const loader = new THREE.TextureLoader();
-                Array.from(files).forEach(file => {
-                    const url = URL.createObjectURL(file);
-                    loader.load(url, (texture) => {
-                        texture.colorSpace = THREE.SRGBColorSpace;
-                        addPhotoToScene(texture);
-                        URL.revokeObjectURL(url);
+                const filesToAdd = Array.from(files);
+
+                const loadPromises = filesToAdd.map(file => {
+                    return new Promise((resolve, reject) => {
+                        const url = URL.createObjectURL(file);
+                        loader.load(
+                            url,
+                            (texture) => {
+                                texture.colorSpace = THREE.SRGBColorSpace;
+                                URL.revokeObjectURL(url);
+                                resolve(texture);
+                            },
+                            undefined,
+                            (err) => {
+                                console.error('Error loading texture:', err);
+                                URL.revokeObjectURL(url);
+                                reject(err); // Reject promise on error
+                            }
+                        );
                     });
                 });
+
+                Promise.all(loadPromises.map(p => p.catch(e => e))) // Continue even if some images fail
+                    .then(results => {
+                        const validTextures = results.filter(r => r instanceof THREE.Texture);
+                        
+                        validTextures.forEach(texture => {
+                            addPhotoToScene(texture);
+                        });
+
+                        // If total photos exceed 12, remove the oldest ones
+                        if (photoParticles.length > 12) {
+                            const toRemoveCount = photoParticles.length - 12;
+                            const removedPhotos = photoParticles.splice(0, toRemoveCount);
+                            
+                            removedPhotos.forEach(p => {
+                                if (p.mesh) {
+                                    p.mesh.traverse((child) => {
+                                        if (child.isMesh) {
+                                            if (child.geometry) child.geometry.dispose();
+                                            if (child.material) {
+                                                if (Array.isArray(child.material)) {
+                                                    child.material.forEach(material => {
+                                                        if (material.map) material.map.dispose();
+                                                        material.dispose();
+                                                    });
+                                                } else {
+                                                    if (child.material.map) child.material.map.dispose();
+                                                    child.material.dispose();
+                                                }
+                                            }
+                                        }
+                                    });
+                                    photoMeshGroup.remove(p.mesh);
+                                }
+                            });
+                        }
+                    });
             });
         }
 
@@ -809,22 +885,24 @@
             const targetCameraZ = (STATE.mode === 'SCATTER') ? CONFIG.camera.zScatter : CONFIG.camera.z;
             camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCameraZ, dt * 2.0);
 
-            if (STATE.mode === 'SCATTER' && STATE.hand.detected) {
-                const targetRotY = STATE.hand.x * Math.PI * 0.9; 
+            // Updated rotation logic
+            if (STATE.mode === 'FOCUS') {
+                // In FOCUS mode, smoothly bring rotation to a halt to stabilize the view
+                STATE.rotation.x = THREE.MathUtils.lerp(STATE.rotation.x, 0, 3.0 * dt);
+            } else if (STATE.mode === 'SCATTER' && STATE.hand.detected) {
+                const targetRotY = STATE.hand.x * Math.PI * 0.9;
                 const targetRotX = STATE.hand.y * Math.PI * 0.25;
                 STATE.rotation.y += (targetRotY - STATE.rotation.y) * 3.0 * dt;
                 STATE.rotation.x += (targetRotX - STATE.rotation.x) * 3.0 * dt;
             } else {
-                if(STATE.mode === 'TREE') {
-                    STATE.rotation.y += 0.3 * dt;
-                } else {
-                     STATE.rotation.y += 0.1 * dt; 
-                }
-                STATE.rotation.x = THREE.MathUtils.lerp(STATE.rotation.x, 0, dt * 2.0);
+                // Default rotation for TREE or SCATTER without hand
+                const baseRotationSpeed = (STATE.mode === 'TREE') ? 0.3 : 0.1;
+                STATE.rotation.y += baseRotationSpeed * dt;
+                STATE.rotation.x = THREE.MathUtils.lerp(STATE.rotation.x, 0, 2.0 * dt);
             }
-
             mainGroup.rotation.y = STATE.rotation.y;
             mainGroup.rotation.x = STATE.rotation.x;
+
 
             particlesData.forEach(p => {
                 let target = (STATE.mode === 'SCATTER') ? p.posScatter : p.posTree;
@@ -854,18 +932,26 @@
             instancedFlake.instanceMatrix.needsUpdate = true;
             instancedGlow.instanceMatrix.needsUpdate = true;
 
+            const lookAtTarget = new THREE.Vector3();
+            camera.getWorldPosition(lookAtTarget);
+            const invMatrix = new THREE.Matrix4().copy(mainGroup.matrixWorld).invert();
+            lookAtTarget.applyMatrix4(invMatrix);
+
             photoParticles.forEach(p => {
                 const frameMesh = p.mesh.children[0];
                 if (STATE.mode === 'FOCUS' && p.mesh === STATE.focusTarget) {
                     frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.8, dt * 5);
-                    const invMatrix = new THREE.Matrix4().copy(mainGroup.matrixWorld).invert();
-                    const targetPos = new THREE.Vector3(0, 2, camera.position.z - 12);
-                    camera.localToWorld(targetPos);
-                    targetPos.applyMatrix4(invMatrix);
+                    
+                    const targetPos = new THREE.Vector3(0, 1.5, camera.position.z - 15);
+                    const invGroupMatrix = new THREE.Matrix4().copy(mainGroup.matrixWorld).invert();
+                    targetPos.applyMatrix4(invGroupMatrix);
 
-                    p.mesh.position.lerp(targetPos, 5.0 * dt);
-                    p.mesh.lookAt(camera.position);
-                    p.mesh.scale.lerp(new THREE.Vector3(3.6,3.6,3.6), 4*dt);
+                    p.mesh.position.lerp(targetPos, 2.5 * dt);
+                    p.mesh.quaternion.slerp(new THREE.Quaternion().setFromRotationMatrix(
+                        new THREE.Matrix4().lookAt(p.mesh.position, lookAtTarget, p.mesh.up)
+                    ), 0.1);
+                    p.mesh.scale.lerp(new THREE.Vector3(5, 5, 5), 2.5 * dt);
+
                 } else {
                     frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.0, dt * 5);
                     const target = (STATE.mode === 'TREE' || STATE.mode === 'FOCUS') ? p.posTree : p.posScatter;
@@ -875,9 +961,7 @@
                         p.mesh.rotation.x += p.spinSpeed.x * dt;
                         p.mesh.rotation.y += p.spinSpeed.y * dt;
                     } else {
-                        p.mesh.rotation.x = THREE.MathUtils.lerp(p.mesh.rotation.x, 0, dt * 4);
-                        p.mesh.rotation.y = THREE.MathUtils.lerp(p.mesh.rotation.y, 0, dt * 4);
-                        p.mesh.rotation.z = THREE.MathUtils.lerp(p.mesh.rotation.z, 0, dt * 4);
+                        p.mesh.quaternion.slerp(new THREE.Quaternion(0,0,0,1), 0.1);
                     }
                     
                     const s = (STATE.mode === 'SCATTER') ? 1.5 : p.baseScale;
