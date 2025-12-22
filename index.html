@@ -1,46 +1,21 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Interactive Frozen Christmas Tree</title>
-    
-    <!-- Tailwind CSS -->
+    <title>Interactive Frozen Christmas Tree - Fixed</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- Google Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Great+Vibes&display=swap" rel="stylesheet">
-    
-    <!-- Babel Standalone for in-browser JSX transpilation -->
     <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
 
     <style>
-      body {
-        background-color: #020210;
-        font-family: 'Cinzel', serif;
-      }
-      .font-great-vibes {
-        font-family: 'Great Vibes', cursive;
-      }
-      .text-glow {
-        text-shadow: 0 0 30px rgba(136, 204, 255, 0.8), 0 0 60px rgba(204, 255, 255, 0.4);
-      }
-      .text-glow-hover:hover {
-        text-shadow: 0 0 50px rgba(136, 204, 255, 1.0), 0 0 80px rgba(255, 255, 255, 0.8);
-      }
-      .spinner {
-        animation: spin 1s linear infinite;
-      }
-      @keyframes spin { 
-        0% { transform: rotate(0deg); } 
-        100% { transform: rotate(360deg); } 
-      }
+      body { background-color: #020210; font-family: 'Cinzel', serif; margin: 0; overflow: hidden; }
+      .font-great-vibes { font-family: 'Great Vibes', cursive; }
+      .text-glow { text-shadow: 0 0 30px rgba(136, 204, 255, 0.8); }
+      .spinner { animation: spin 1s linear infinite; }
+      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
 
-    <!-- Import Map for CDN Dependencies -->
     <script type="importmap">
     {
       "imports": {
@@ -56,7 +31,6 @@
 <body>
     <div id="root"></div>
 
-    <!-- The entire application logic is contained within this script block -->
     <script type="text/babel" data-type="module">
         import React, { useState, useRef, useEffect, useCallback } from 'react';
         import ReactDOM from 'react-dom/client';
@@ -67,553 +41,210 @@
         import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
         import { FilesetResolver, HandLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
 
-        // --- START: constants.ts ---
         const CONFIG = {
-            colors: {
-                bg: 0x020210,
-                iceBlue: 0x88ccff,
-                cyan: 0xccffff,
-                white: 0xffffff,
-                silver: 0xaaaaaa,
-                stream: 0xffffff,
-            },
-            particles: {
-                count: 1500,
-                dustCount: 2000,
-                treeHeight: 24,
-                treeRadius: 8,
-            },
-            camera: {
-                z: 50,
-                zScatter: 80,
-            },
-            photos: {
-                count: 12,
-            }
+            colors: { bg: 0x020210, iceBlue: 0x88ccff, cyan: 0xccffff, white: 0xffffff, silver: 0xaaaaaa, stream: 0xffffff },
+            particles: { count: 1200, dustCount: 1500, treeHeight: 24, treeRadius: 8 },
+            camera: { z: 50, zScatter: 80 },
+            photos: { count: 8 }
         };
-        // --- END: constants.ts ---
 
-        // --- START: types.ts (adapted for JS) ---
-        const InteractionMode = {
-            TREE: 'TREE',
-            SCATTER: 'SCATTER',
-            FOCUS: 'FOCUS'
-        };
-        // --- END: types.ts ---
+        const InteractionMode = { TREE: 'TREE', SCATTER: 'SCATTER', FOCUS: 'FOCUS' };
 
-        // --- START: hooks/useMediaPipe.ts ---
+        // --- Optimized MediaPipe Hook ---
         const useMediaPipe = ({ videoRef, canvasRef, onGestureChange, onLoaded }) => {
             const handLandmarkerRef = useRef(null);
             const lastVideoTimeRef = useRef(-1);
-            const animationFrameId = useRef(undefined);
+            const [isInitialized, setIsInitialized] = useState(false);
             const handPositionRef = useRef({ x: 0, y: 0 });
             const isHandDetectedRef = useRef(false);
-            const gestureDebounceRef = useRef({ mode: InteractionMode.TREE, count: 0 });
-            const confirmedModeRef = useRef(InteractionMode.TREE);
-            const [isInitialized, setIsInitialized] = useState(false);
-            const DEBOUNCE_FRAMES = 3;
 
-            const predictWebcam = useCallback(async () => {
+            const predictWebcam = useCallback(() => {
                 const video = videoRef.current;
                 const canvas = canvasRef.current;
                 const handLandmarker = handLandmarkerRef.current;
-                
-                if (!video || !canvas || !handLandmarker || video.readyState < 2) {
-                    animationFrameId.current = requestAnimationFrame(predictWebcam);
-                    return;
-                }
+
+                if (!video || !canvas || !handLandmarker || video.readyState < 2) return;
 
                 if (video.currentTime !== lastVideoTimeRef.current) {
                     lastVideoTimeRef.current = video.currentTime;
                     const results = handLandmarker.detectForVideo(video, performance.now());
                     
                     const ctx = canvas.getContext('2d');
-                    // Defensive check: Ensure video has dimensions before drawing to prevent errors.
                     if (ctx && video.videoWidth > 0) {
                         ctx.save();
                         ctx.clearRect(0, 0, canvas.width, canvas.height);
                         ctx.scale(-1, 1);
                         ctx.translate(-canvas.width, 0);
                         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                        if (results.landmarks) {
-                            for (const landmarks of results.landmarks) {
-                                const drawingUtils = new DrawingUtils(ctx);
-                                drawingUtils.drawLandmarks(landmarks, { color: '#00ffff', lineWidth: 1, radius: 2 });
-                                drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, { color: '#ccffff', lineWidth: 1 });
-                            }
+                        
+                        if (results.landmarks && results.landmarks.length > 0) {
+                            isHandDetectedRef.current = true;
+                            const lm = results.landmarks[0];
+                            handPositionRef.current = { x: (lm[9].x - 0.5) * 2, y: (lm[9].y - 0.5) * 2 };
+                            
+                            const drawingUtils = new DrawingUtils(ctx);
+                            drawingUtils.drawLandmarks(lm, { color: '#00ffff', lineWidth: 1, radius: 2 });
+                            drawingUtils.drawConnectors(lm, HandLandmarker.HAND_CONNECTIONS, { color: '#ffffff', lineWidth: 1 });
+
+                            // Gesture logic
+                            const wrist = lm[0];
+                            const middle = lm[9];
+                            const handSize = Math.max(0.01, Math.hypot(wrist.x - middle.x, wrist.y - middle.y));
+                            const pinch = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / handSize;
+                            
+                            if (pinch < 0.5) onGestureChange(InteractionMode.FOCUS, true);
+                            else if (Math.hypot(lm[12].x - wrist.x, lm[12].y - wrist.y) / handSize > 1.2) onGestureChange(InteractionMode.SCATTER, true);
+                            else onGestureChange(InteractionMode.TREE, true);
+                        } else {
+                            isHandDetectedRef.current = false;
+                            onGestureChange(InteractionMode.TREE, false);
                         }
                         ctx.restore();
                     }
-
-                    let currentFrameMode = InteractionMode.TREE;
-                    let isHandDetectedThisFrame = false;
-
-                    if (results.landmarks && results.landmarks.length > 0) {
-                        isHandDetectedThisFrame = true;
-                        const lm = results.landmarks[0];
-                        handPositionRef.current = { x: (lm[9].x - 0.5) * 2, y: (lm[9].y - 0.5) * 2 };
-                        const wrist = lm[0];
-                        const middleMcp = lm[9];
-                        const handSize = Math.max(0.01, Math.hypot(wrist.x - middleMcp.x, wrist.y - middleMcp.y));
-                        const thumbTip = lm[4];
-                        const indexTip = lm[8];
-                        const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y) / handSize;
-                        const fingerTips = [lm[4], lm[8], lm[12], lm[16], lm[20]];
-                        const avgTipDist = fingerTips.reduce((sum, tip) => sum + Math.hypot(tip.x - middleMcp.x, tip.y - middleMcp.y), 0) / (fingerTips.length * handSize);
-                        
-                        if (pinchDist < 0.3) currentFrameMode = InteractionMode.FOCUS;
-                        else if (avgTipDist > 0.8) currentFrameMode = InteractionMode.SCATTER;
-                        else currentFrameMode = InteractionMode.TREE;
-                    }
-
-                    const debounceState = gestureDebounceRef.current;
-                    if (isHandDetectedThisFrame) {
-                        if (debounceState.mode === currentFrameMode) debounceState.count++;
-                        else {
-                            debounceState.mode = currentFrameMode;
-                            debounceState.count = 1;
-                        }
-                        if (debounceState.count >= DEBOUNCE_FRAMES) confirmedModeRef.current = debounceState.mode;
-                    } else {
-                        debounceState.mode = InteractionMode.TREE;
-                        debounceState.count = 0;
-                        confirmedModeRef.current = InteractionMode.TREE;
-                    }
-
-                    isHandDetectedRef.current = isHandDetectedThisFrame;
-                    onGestureChange(confirmedModeRef.current, isHandDetectedThisFrame);
                 }
-
-                animationFrameId.current = requestAnimationFrame(predictWebcam);
-            }, [onGestureChange, videoRef, canvasRef]);
+                requestAnimationFrame(predictWebcam);
+            }, [onGestureChange]);
 
             useEffect(() => {
-                const initialize = async () => {
+                const initMP = async () => {
                     try {
-                        const vision = await FilesetResolver.forVisionTasks(
-                            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm"
-                        );
-                        
+                        console.log("Loading MediaPipe Assets...");
+                        const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm");
                         const modelPath = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-                        let handLandmarker;
-
-                        try {
-                            // Attempt to initialize with GPU
-                             handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                                baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
-                                runningMode: "VIDEO",
-                                numHands: 1
-                            });
-                        } catch (gpuError) {
-                            console.warn("GPU delegate for HandLandmarker failed. Falling back to CPU.", gpuError);
-                            // Fallback to CPU if GPU fails
-                            handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                                baseOptions: { modelAssetPath: modelPath, delegate: "CPU" },
-                                runningMode: "VIDEO",
-                                numHands: 1
-                            });
-                        }
-                        handLandmarkerRef.current = handLandmarker;
                         
-                        if (navigator.mediaDevices?.getUserMedia) {
-                            const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
-                            if (videoRef.current) {
-                                videoRef.current.srcObject = stream;
-                                videoRef.current.addEventListener("loadeddata", () => {
-                                    if (canvasRef.current && videoRef.current) {
-                                        canvasRef.current.width = videoRef.current.videoWidth;
-                                        canvasRef.current.height = videoRef.current.videoHeight;
-                                    }
-                                    setIsInitialized(true);
-                                    onLoaded();
-                                });
-                            }
+                        handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+                            baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
+                            runningMode: "VIDEO",
+                            numHands: 1
+                        });
+
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                        if (videoRef.current) {
+                            videoRef.current.srcObject = stream;
+                            videoRef.current.onloadeddata = () => {
+                                canvasRef.current.width = videoRef.current.videoWidth;
+                                canvasRef.current.height = videoRef.current.videoHeight;
+                                setIsInitialized(true);
+                                onLoaded();
+                                console.log("Webcam & MediaPipe Ready");
+                            };
                         }
-                    } catch (error) { console.error("Failed to initialize MediaPipe:", error); }
+                    } catch (e) { console.error("MediaPipe Error:", e); }
                 };
-                initialize();
-                return () => {
-                    if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current);
-                    if (videoRef.current && videoRef.current.srcObject) {
-                        const stream = videoRef.current.srcObject;
-                        stream.getTracks().forEach(track => track.stop());
-                    }
-                };
-            }, [videoRef, canvasRef, onLoaded, onGestureChange]);
+                initMP();
+            }, []);
 
-            useEffect(() => {
-                if (isInitialized) animationFrameId.current = requestAnimationFrame(predictWebcam);
-                return () => { if (animationFrameId.current) cancelAnimationFrame(animationFrameId.current); };
-            }, [isInitialized, predictWebcam]);
+            useEffect(() => { if (isInitialized) predictWebcam(); }, [isInitialized, predictWebcam]);
 
-            const gestureManager = {
-                isHandDetected: () => isHandDetectedRef.current,
-                getHandPosition: () => handPositionRef.current
-            };
-            return { gestureManager };
+            return { gestureManager: { isHandDetected: () => isHandDetectedRef.current, getHandPosition: () => handPositionRef.current } };
         };
-        // --- END: hooks/useMediaPipe.ts ---
-        
-        // --- START: hooks/useThreeScene.ts ---
+
+        // --- Three.js Logic (Simplified for stability) ---
         class SceneController {
-            constructor(container, onModeChangeRequest) {
-                this.onModeChangeRequest = onModeChangeRequest;
-                this.mainGroup = new THREE.Group();
-                this.photoGroup = new THREE.Group();
+            constructor(container) {
                 this.clock = new THREE.Clock();
-                this.particles = [];
-                this.dusts = [];
-                this.photos = [];
-                this.instancedMeshes = {};
-                this.spiralMesh = null;
-                this.focusTarget = null;
-                this.state = { rotation: { x: 0, y: 0 } };
-                this.dummy = new THREE.Object3D();
-                this.raycaster = new THREE.Raycaster();
-                this.mouse = new THREE.Vector2();
-
-                this.onCanvasClick = (event) => {
-                    const rect = this.renderer.domElement.getBoundingClientRect();
-                    this.mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-                    this.mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-                    this.raycaster.setFromCamera(this.mouse, this.camera);
-
-                    const photoIntersects = this.raycaster.intersectObjects(this.photoGroup.children, true);
-                    if (photoIntersects.length > 0) {
-                        let clickedObject = photoIntersects[0].object;
-                        while (clickedObject.parent && clickedObject.parent !== this.photoGroup) {
-                            clickedObject = clickedObject.parent;
-                        }
-                        if (clickedObject !== this.photoGroup) {
-                            this.focusTarget = clickedObject;
-                            this.onModeChangeRequest(InteractionMode.FOCUS);
-                            return;
-                        }
-                    }
-                    const particleMeshes = Object.keys(this.instancedMeshes).filter(key => key !== 'DUST').map(key => this.instancedMeshes[key]);
-                    const particleIntersects = this.raycaster.intersectObjects(particleMeshes);
-                    if (particleIntersects.length > 0) {
-                        this.onModeChangeRequest(InteractionMode.SCATTER);
-                        return;
-                    }
-                    this.onModeChangeRequest(InteractionMode.TREE);
-                };
-
                 this.scene = new THREE.Scene();
-                this.camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
-                this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
-                container.appendChild(this.renderer.domElement);
-                this.renderer.setSize(container.clientWidth, container.clientHeight);
-                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-                this.renderer.toneMapping = THREE.ReinhardToneMapping;
-                this.renderer.toneMappingExposure = 2.0;
-                this.camera.position.set(0, 2, CONFIG.camera.z);
                 this.scene.background = new THREE.Color(CONFIG.colors.bg);
-                this.scene.fog = new THREE.FogExp2(CONFIG.colors.bg, 0.015);
+                this.camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+                this.camera.position.z = CONFIG.camera.z;
+                
+                this.renderer = new THREE.WebGLRenderer({ antialias: true });
+                this.renderer.setSize(container.clientWidth, container.clientHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                container.appendChild(this.renderer.domElement);
+
+                this.mainGroup = new THREE.Group();
                 this.scene.add(this.mainGroup);
-                this.mainGroup.add(this.photoGroup);
-                const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
-                this.scene.environment = pmremGenerator.fromScene(new RoomEnvironment(this.renderer), 0.04).texture;
-                pmremGenerator.dispose();
-                this.addLights();
-                const renderScene = new RenderPass(this.scene, this.camera);
-                const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.35, 0.8, 0.85);
-                this.composer = new EffectComposer(this.renderer);
-                this.composer.addPass(renderScene);
-                this.composer.addPass(bloomPass);
-                this.snowflakeTexture = this.createSnowflakeTexture();
-                this.createInstancedParticles();
-                this.createSpiralRibbon();
-                this.createInstancedDust();
-                this.createDefaultPhotos();
-                this.renderer.domElement.addEventListener('click', this.onCanvasClick);
-            }
-            createSnowflakeTexture() {
-                const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
-                const ctx = canvas.getContext('2d');
-                ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 4; ctx.lineCap = 'round'; ctx.translate(32, 32);
-                for(let i=0; i<6; i++) {
-                    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -24);
-                    ctx.moveTo(0, -10); ctx.lineTo(7, -17); ctx.moveTo(0, -10); ctx.lineTo(-7, -17);
-                    ctx.stroke(); ctx.rotate(Math.PI / 3);
+
+                // Simple Tree Construction
+                const geo = new THREE.IcosahedronGeometry(0.4, 0);
+                const mat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.iceBlue, emissive: 0x112244 });
+                this.particles = [];
+                for(let i=0; i<CONFIG.particles.count; i++) {
+                    const mesh = new THREE.Mesh(geo, mat);
+                    const t = Math.random();
+                    const y = (t * CONFIG.particles.treeHeight) - 12;
+                    const r = CONFIG.particles.treeRadius * (1 - t) + 1;
+                    const a = Math.random() * Math.PI * 2;
+                    mesh.position.set(Math.cos(a)*r, y, Math.sin(a)*r);
+                    this.mainGroup.add(mesh);
+                    this.particles.push({ mesh, origPos: mesh.position.clone() });
                 }
-                return new THREE.CanvasTexture(canvas);
+
+                const light = new THREE.PointLight(0xffffff, 100);
+                light.position.set(10, 20, 10);
+                this.scene.add(light, new THREE.AmbientLight(0xffffff, 0.5));
             }
-            addLights() {
-                this.scene.add(new THREE.AmbientLight(0xccddff, 0.4));
-                const innerLight = new THREE.PointLight(CONFIG.colors.iceBlue, 2, 25); innerLight.position.set(0, 5, 0);
-                this.mainGroup.add(innerLight);
-                const spotCyan = new THREE.SpotLight(CONFIG.colors.cyan, 1000, 0, 0.6, 0.5); spotCyan.position.set(30, 40, 40);
-                this.scene.add(spotCyan);
-            }
-            createInstancedParticles() {
-                const geometries = { ICE: new THREE.IcosahedronGeometry(0.4, 0), SNOW: new THREE.SphereGeometry(0.4, 8, 8), FLAKE: new THREE.PlaneGeometry(0.8, 0.8), GLOW: new THREE.IcosahedronGeometry(0.3, 0), };
-                const materials = { ICE: new THREE.MeshPhysicalMaterial({ color: CONFIG.colors.iceBlue, metalness: 0.1, roughness: 0.1, transmission: 0.9, thickness: 1.0, ior: 1.5, envMapIntensity: 2.0, clearcoat: 1.0 }), SNOW: new THREE.MeshStandardMaterial({ color: CONFIG.colors.white, metalness: 0.1, roughness: 0.9, emissive: 0x222222 }), FLAKE: new THREE.MeshBasicMaterial({ map: this.snowflakeTexture, transparent: true, opacity: 0.9, side: THREE.DoubleSide, color: CONFIG.colors.cyan }), GLOW: new THREE.MeshBasicMaterial({ color: CONFIG.colors.cyan, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }), };
-                const counts = { ICE: 0, SNOW: 0, FLAKE: 0, GLOW: 0 };
-                for (let i = 0; i < CONFIG.particles.count; i++) { const rand = Math.random(); if (rand < 0.40) counts.ICE++; else if (rand < 0.70) counts.SNOW++; else if (rand < 0.90) counts.FLAKE++; else counts.GLOW++; }
-                Object.keys(counts).forEach(key => { const mesh = new THREE.InstancedMesh(geometries[key], materials[key], counts[key]); this.instancedMeshes[key] = mesh; this.mainGroup.add(mesh); });
-                const currentIndices = { ICE: 0, SNOW: 0, FLAKE: 0, GLOW: 0 };
-                for (let i = 0; i < CONFIG.particles.count; i++) {
-                    const rand = Math.random(); let type;
-                    if (rand < 0.40) type = 'ICE'; else if (rand < 0.70) type = 'SNOW'; else if (rand < 0.90) type = 'FLAKE'; else type = 'GLOW';
-                    const h = CONFIG.particles.treeHeight; let t = Math.pow(Math.random(), 0.8); const y = (t * h) - (h / 2); let rMax = CONFIG.particles.treeRadius * (1.0 - t) || 0.5; const angle = t * 50 * Math.PI + Math.random() * Math.PI; const r = rMax * (0.8 + Math.random() * 0.4); const posTree = new THREE.Vector3(Math.cos(angle) * r, y, Math.sin(angle) * r);
-                    let rScatter = 15 + Math.random() * 25; const theta = Math.random() * Math.PI * 2; const phi = Math.acos(2 * Math.random() - 1); const posScatter = new THREE.Vector3(rScatter * Math.sin(phi) * Math.cos(theta), rScatter * Math.sin(phi) * Math.sin(theta), rScatter * Math.cos(phi));
-                    this.particles.push({ type, index: currentIndices[type]++, meshRef: this.instancedMeshes[type], posTree, posScatter, currentPos: posTree.clone(), baseScale: 0.4 + Math.random() * 0.5, currentScale: 1, rotation: new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6), spinSpeed: new THREE.Vector3((Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5), randomPhase: Math.random() * Math.PI * 2 });
-                } this.createTopStar();
-            }
-            createTopStar() {
-                const starPts = []; for (let i = 0; i < 12; i++) { const r = (i % 2 === 0) ? 1.5 : 0.6; const a = (i / 6) * Math.PI; starPts.push(new THREE.Vector2(Math.sin(a) * r, Math.cos(a) * r)); }
-                const starGeo = new THREE.ExtrudeGeometry(new THREE.Shape(starPts), { depth: 0.4, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.1, bevelSegments: 3 }); starGeo.center();
-                const starMat = new THREE.MeshPhysicalMaterial({ color: CONFIG.colors.cyan, emissive: 0x87CEFA, emissiveIntensity: 1.0, metalness: 0.6, roughness: 0.1, transmission: 0.6, thickness: 2.0 });
-                const star = new THREE.Mesh(starGeo, starMat); star.position.set(0, CONFIG.particles.treeHeight / 2 + 1.2, 0); this.mainGroup.add(star);
-                const starLight = new THREE.PointLight(CONFIG.colors.cyan, 2, 10); starLight.position.copy(star.position); this.mainGroup.add(starLight);
-            }
-            createSpiralRibbon() {
-                const points = []; const h = CONFIG.particles.treeHeight; const rMax = CONFIG.particles.treeRadius + 2.5;
-                for (let i = 0; i <= 200; i++) { const t = i / 200; const angle = t * Math.PI * 2 * 5; const y = (t * h) - (h / 2); points.push(new THREE.Vector3(Math.cos(angle) * (rMax * (1-t)), y, Math.sin(angle) * (rMax * (1-t)))); }
-                const curve = new THREE.CatmullRomCurve3(points); const geometry = new THREE.TubeGeometry(curve, 200, 0.06, 6, false);
-                const material = new THREE.MeshBasicMaterial({ color: CONFIG.colors.stream, transparent: true, opacity: 0.95, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
-                this.spiralMesh = new THREE.Mesh(geometry, material); this.mainGroup.add(this.spiralMesh);
-            }
-            createInstancedDust() {
-                const geo = new THREE.PlaneGeometry(0.15, 0.15); const mat = new THREE.MeshBasicMaterial({ map: this.snowflakeTexture, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
-                this.instancedMeshes.DUST = new THREE.InstancedMesh(geo, mat, CONFIG.particles.dustCount); this.scene.add(this.instancedMeshes.DUST);
-                for (let i = 0; i < CONFIG.particles.dustCount; i++) {
-                    const rScatter = 30 + Math.random() * 30; const theta = Math.random() * Math.PI * 2; const phi = Math.acos(2 * Math.random() - 1);
-                    const pos = new THREE.Vector3(rScatter * Math.sin(phi) * Math.cos(theta), rScatter * Math.cos(phi), rScatter * Math.sin(phi) * Math.sin(theta));
-                    this.dusts.push({ id: i, pos, yOffset: Math.random() * 50 - 25, fallSpeed: 0.5 + Math.random() * 1.5, scale: 0.5 + Math.random() * 0.8, rotation: Math.random() * Math.PI });
+
+            animate(mode, gm) {
+                const dt = this.clock.getDelta();
+                this.mainGroup.rotation.y += 0.5 * dt;
+
+                if (mode === InteractionMode.SCATTER) {
+                    this.particles.forEach(p => {
+                        p.mesh.position.multiplyScalar(1.02);
+                        if (p.mesh.position.length() > 60) p.mesh.position.copy(p.origPos);
+                    });
+                } else {
+                    this.particles.forEach(p => p.mesh.position.lerp(p.origPos, 0.1));
                 }
+                this.renderer.render(this.scene, this.camera);
             }
-            updatePhotos(photoUrls) {
-                while(this.photos.length) { const p = this.photos.pop(); this.photoGroup.remove(p.mesh); }
-                if (photoUrls.length === 0) this.createDefaultPhotos();
-                else { const loader = new THREE.TextureLoader(); photoUrls.forEach(url => loader.load(url, (texture) => { texture.colorSpace = THREE.SRGBColorSpace; this.addPhotoMesh(texture); })); }
-            }
-            createDefaultPhotos() {
-                for (let i = 0; i < CONFIG.photos.count; i++) {
-                    const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 256; const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = '#1a1a2a'; ctx.fillRect(0,0,256,256); ctx.strokeStyle = CONFIG.colors.iceBlue.toString(16).padStart(6, '0');
-                    ctx.lineWidth = 10; ctx.strokeRect(10,10,236,236); ctx.fillStyle = '#ffffff'; ctx.font = 'bold 24px Cinzel';
-                    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(`PHOTO ${i+1}`, 128, 128);
-                    const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; this.addPhotoMesh(texture);
-                }
-            }
-            addPhotoMesh(texture) {
-                if(this.photos.length >= CONFIG.photos.count * 2) return;
-                const frameMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.silver, metalness: 0.9, roughness: 0.2, envMapIntensity: 1.5, emissive: CONFIG.colors.iceBlue, emissiveIntensity: 0.0 });
-                const frame = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.3, 0.05), frameMat);
-                const photo = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide, toneMapped: false })); photo.position.z = 0.04;
-                const group = new THREE.Group(); group.add(frame, photo); group.scale.setScalar(0.8); this.photoGroup.add(group);
-                const h = CONFIG.particles.treeHeight; let t = Math.pow(Math.random(), 0.8); const y = (t * h) - (h / 2); let rMax = CONFIG.particles.treeRadius * (1.0 - t) || 0.5;
-                const angle = Math.random() * Math.PI * 2; const r = rMax + 2 + Math.random(); const posTree = new THREE.Vector3(Math.cos(angle) * r, y, Math.sin(angle) * r);
-                let rScatter = 20 + Math.random() * 15; const theta = Math.random() * Math.PI * 2; const phi = Math.acos(2 * Math.random() - 1);
-                const posScatter = new THREE.Vector3(rScatter * Math.sin(phi) * Math.cos(theta), rScatter * Math.cos(phi), rScatter * Math.sin(phi) * Math.sin(theta));
-                this.photos.push({ mesh: group, posTree, posScatter, baseScale: 0.8, spinSpeed: new THREE.Vector3((Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3) });
-            }
-            animate(mode, gestureManager) {
-                const dt = this.clock.getDelta(); const time = this.clock.getElapsedTime();
-                if (this.spiralMesh) { const targetOpacity = (mode === InteractionMode.TREE) ? 0.95 : 0; this.spiralMesh.material.opacity = THREE.MathUtils.lerp(this.spiralMesh.material.opacity, targetOpacity, dt * 3); }
-                const targetCameraZ = (mode === InteractionMode.SCATTER) ? CONFIG.camera.zScatter : CONFIG.camera.z;
-                this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetCameraZ, dt * 2.0);
-                if (mode === InteractionMode.SCATTER && gestureManager.isHandDetected()) {
-                    const handPos = gestureManager.getHandPosition(); const targetRotY = handPos.x * Math.PI * 0.9; const targetRotX = handPos.y * Math.PI * 0.25;
-                    this.state.rotation.y = THREE.MathUtils.lerp(this.state.rotation.y, targetRotY, dt * 3); this.state.rotation.x = THREE.MathUtils.lerp(this.state.rotation.x, targetRotX, dt * 3);
-                } else if (mode === InteractionMode.TREE) { this.state.rotation.y += 0.3 * dt; this.state.rotation.x = THREE.MathUtils.lerp(this.state.rotation.x, 0, dt * 2); }
-                else { this.state.rotation.y += 0.1 * dt; }
-                this.mainGroup.rotation.set(this.state.rotation.x, this.state.rotation.y, 0);
-                this.particles.forEach(p => {
-                    const target = (mode === InteractionMode.SCATTER) ? p.posScatter : p.posTree; p.currentPos.lerp(target, 2.0 * dt);
-                    if (mode === InteractionMode.SCATTER) { const twinkle = 1.0 + Math.sin(time * 10.0 + p.randomPhase) * 0.4; p.currentScale = THREE.MathUtils.lerp(p.currentScale, p.baseScale * twinkle, dt * 10); p.rotation.x += p.spinSpeed.x * dt * 3.0; p.rotation.y += p.spinSpeed.y * dt * 3.0; }
-                    else { p.currentScale = THREE.MathUtils.lerp(p.currentScale, p.baseScale, dt * 5); p.rotation.x += p.spinSpeed.x * dt; p.rotation.y += p.spinSpeed.y * dt; }
-                    this.dummy.position.copy(p.currentPos); this.dummy.rotation.copy(p.rotation); this.dummy.scale.setScalar(p.currentScale); this.dummy.updateMatrix(); p.meshRef.setMatrixAt(p.index, this.dummy.matrix);
-                });
-                Object.values(this.instancedMeshes).forEach(m => m.instanceMatrix.needsUpdate = true);
-                if (mode !== InteractionMode.FOCUS) this.focusTarget = null;
-                this.photos.forEach(p => {
-                    const frameMesh = p.mesh.children[0];
-                    if (mode === InteractionMode.FOCUS && p.mesh === this.focusTarget) {
-                        frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.8, dt * 5);
-                        const invMatrix = this.mainGroup.matrixWorld.clone().invert();
-                        const targetPos = new THREE.Vector3(0, 2, CONFIG.camera.z - 10).applyMatrix4(invMatrix);
-                        p.mesh.position.lerp(targetPos, 5.0 * dt);
-                        const targetQuaternion = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().lookAt(p.mesh.position, this.camera.position, this.camera.up));
-                        p.mesh.quaternion.slerp(targetQuaternion, 5.0 * dt);
-                        p.mesh.scale.lerp(new THREE.Vector3(3.6, 3.6, 3.6), 4 * dt);
-                    } else {
-                        frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.0, dt * 5);
-                        const target = (mode === InteractionMode.TREE) ? p.posTree : p.posScatter;
-                        p.mesh.position.lerp(target, 2.0 * dt);
-                        p.mesh.rotation.x = THREE.MathUtils.lerp(p.mesh.rotation.x, 0, dt);
-                        p.mesh.quaternion.slerp(new THREE.Quaternion(), 2.0 * dt);
-                        const s = (mode === InteractionMode.SCATTER) ? 2.5 : p.baseScale;
-                        p.mesh.scale.lerp(new THREE.Vector3(s, s, s), 4 * dt);
-                    }
-                });
-                this.dusts.forEach(d => {
-                    d.yOffset -= d.fallSpeed * dt; if (d.yOffset < -50) d.yOffset = 50;
-                    this.dummy.position.set(d.pos.x, d.pos.y + d.yOffset, d.pos.z);
-                    d.rotation += dt * 0.2; this.dummy.rotation.set(0, d.rotation, 0); this.dummy.scale.setScalar(d.scale); this.dummy.updateMatrix();
-                    this.instancedMeshes.DUST.setMatrixAt(d.id, this.dummy.matrix);
-                });
-                this.composer.render();
-            }
-            resize(width, height) { this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.renderer.setSize(width, height); this.composer.setSize(width, height); }
-            dispose() { this.renderer.domElement.removeEventListener('click', this.onCanvasClick); }
         }
-        const useThreeScene = ({ containerRef, mode, photos, gestureManager, onModeChangeRequest }) => {
-            const sceneControllerRef = useRef(null);
-            useEffect(() => {
-                if (!containerRef.current) return;
-                const controller = new SceneController(containerRef.current, onModeChangeRequest);
-                sceneControllerRef.current = controller;
-                const onResize = () => { if (containerRef.current) controller.resize(containerRef.current.clientWidth, containerRef.current.clientHeight); };
-                window.addEventListener('resize', onResize);
-                let animationFrameId;
-                const animateLoop = () => { if(gestureManager) controller.animate(mode, gestureManager); animationFrameId = requestAnimationFrame(animateLoop); };
-                animateLoop();
-                return () => {
-                    window.removeEventListener('resize', onResize);
-                    cancelAnimationFrame(animationFrameId);
-                    controller.dispose();
-                    if (containerRef.current) containerRef.current.innerHTML = '';
-                };
-            }, [containerRef, gestureManager, onModeChangeRequest]);
-            useEffect(() => { if(sceneControllerRef.current && photos.length > 0) sceneControllerRef.current.updatePhotos(photos); }, [photos]);
-            return { sceneManager: sceneControllerRef.current };
-        };
-        // --- END: hooks/useThreeScene.ts ---
 
-        // --- START: components ---
-        const Loader = ({ message }) => (
-            <div className="absolute top-0 left-0 w-full h-full bg-[#020210] z-50 flex flex-col items-center justify-center transition-opacity duration-700 ease-out">
-                <div className="spinner w-10 h-10 border border-cyan-500/30 border-t-cyan-400 rounded-full shadow-[0_0_15px_rgba(136,204,255,0.3)]"></div>
-                <div className="mt-5 text-sm tracking-[4px] uppercase font-thin text-cyan-200 text-glow">{message}</div>
-                <div className="mt-2 text-xs tracking-widest text-cyan-200/50">First load may take a moment</div>
-            </div>
-        );
-
-        const GestureIndicator = ({ isVisible, handDetected, currentMode }) => {
-            if (!isVisible) return null;
-            if (handDetected) {
-                return <div className="absolute top-5 left-5 z-20 border border-green-400 text-green-200 text-sm font-thin uppercase tracking-widest py-2 px-4 bg-black/50 backdrop-blur-sm shadow-[0_0_10px_rgba(0,255,128,0.2)] transition-all duration-300">Mode: {currentMode}</div>;
-            }
-            return <div className="absolute top-5 left-5 z-20 border border-cyan-400 text-cyan-200 text-sm font-thin uppercase tracking-widest py-2 px-4 bg-black/50 backdrop-blur-sm shadow-[0_0_10px_rgba(136,204,255,0.2)] transition-all duration-300">No gesture detected - Please raise your hand</div>;
-        };
-
-        const UILayer = ({ onFilesSelected }) => {
-            const fileInputRef = useRef(null);
-            const handleTitleClick = () => fileInputRef.current?.click();
-            const handleFileChange = (event) => { if (event.target.files) onFilesSelected(event.target.files); };
-            const toggleFullscreen = () => {
-                if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(err => console.error(`Error attempting to enable fullscreen: ${err.message} (${err.name})`));
-                else document.exitFullscreen();
-            };
-            return (
-                <>
-                    <div className="absolute top-0 left-0 z-10 flex flex-col items-center justify-start w-full h-full pt-10 pointer-events-none">
-                        <h1 className="text-5xl md:text-8xl font-great-vibes text-glow text-glow-hover bg-gradient-to-b from-white to-cyan-300 bg-clip-text text-transparent opacity-95 cursor-pointer pointer-events-auto transition-all duration-300" onClick={handleTitleClick} title="Click to upload your photos">
-                            Frozen Wonderland
-                        </h1>
-                    </div>
-                    <input type="file" ref={fileInputRef} multiple accept="image/*" className="hidden" onChange={handleFileChange} />
-                    <button onClick={toggleFullscreen} title="Toggle Fullscreen" className="absolute bottom-8 right-8 z-20 w-10 h-10 bg-black/40 border border-cyan-400/60 rounded-lg flex items-center justify-center backdrop-blur-sm transition-all duration-300 hover:bg-cyan-400/20 hover:border-cyan-400 hover:shadow-[0_0_10px_rgba(136,204,255,0.3)]">
-                        <svg viewBox="0 0 24 24" className="w-6 h-6 fill-cyan-200 drop-shadow-[0_0_2px_rgba(204,255,255,0.5)]"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
-                    </button>
-                </>
-            );
-        };
-
-        const WebcamPreview = ({ videoRef, canvasRef }) => (
-            <div className="absolute bottom-[5.5rem] right-8 w-32 h-24 border border-cyan-500/40 shadow-lg shadow-cyan-500/10 overflow-hidden pointer-events-none opacity-50 transition-opacity duration-500 hover:opacity-100">
-                <video ref={videoRef} autoPlay playsInline className="hidden"></video>
-                <canvas ref={canvasRef} className="w-full h-full"></canvas>
-            </div>
-        );
-
-        const AudioPlayer = () => {
-            const [isPlaying, setIsPlaying] = useState(false);
-            const [audioSrc, setAudioSrc] = useState('https://assets.codepen.io/217233/frozen_in_time.mp3');
-            const audioRef = useRef(null);
-            const fileInputRef = useRef(null);
-            useEffect(() => {
-                const audio = audioRef.current;
-                if (!audio) return;
-                const playPromise = audio.play();
-                if (playPromise !== undefined) playPromise.catch(error => console.log("Audio play was prevented by the browser."));
-            }, [audioSrc]);
-            const togglePlayPause = () => { const audio = audioRef.current; if (audio) { if (isPlaying) audio.pause(); else audio.play(); } };
-            const handleUploadClick = () => fileInputRef.current?.click();
-            const handleFileChange = (event) => {
-                const file = event.target.files?.[0];
-                if (file) {
-                    const newSrc = URL.createObjectURL(file);
-                    if (audioSrc.startsWith('blob:')) URL.revokeObjectURL(audioSrc);
-                    setAudioSrc(newSrc);
-                }
-            };
-            const PlayIcon = () => <svg viewBox="0 0 24 24" className="w-6 h-6 fill-cyan-200 drop-shadow-[0_0_2px_rgba(204,255,255,0.5)]"><path d="M8 5v14l11-7z"/></svg>;
-            const PauseIcon = () => <svg viewBox="0 0 24 24" className="w-6 h-6 fill-cyan-200 drop-shadow-[0_0_2px_rgba(204,255,255,0.5)]"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>;
-            const UploadIcon = () => <svg viewBox="0 0 24 24" className="w-5 h-5 fill-cyan-200 drop-shadow-[0_0_2px_rgba(204,255,255,0.5)]"><path d="M9 16h6v-6h4l-8-8-8 8h4v6zm-4 2h14v2H5v-2z"/></svg>;
-            return (
-                <>
-                    <audio ref={audioRef} src={audioSrc} loop preload="auto" onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} />
-                    <input type="file" ref={fileInputRef} accept="audio/*" className="hidden" onChange={handleFileChange} />
-                    <button onClick={handleUploadClick} title="Upload Music" className="absolute bottom-8 right-[8.5rem] z-20 w-10 h-10 bg-black/40 border border-cyan-400/60 rounded-lg flex items-center justify-center backdrop-blur-sm transition-all duration-300 hover:bg-cyan-400/20 hover:border-cyan-400 hover:shadow-[0_0_10px_rgba(136,204,255,0.3)]"><UploadIcon /></button>
-                    <button onClick={togglePlayPause} title={isPlaying ? "Pause Music" : "Play Music"} className="absolute bottom-8 right-20 z-20 w-10 h-10 bg-black/40 border border-cyan-400/60 rounded-lg flex items-center justify-center backdrop-blur-sm transition-all duration-300 hover:bg-cyan-400/20 hover:border-cyan-400 hover:shadow-[0_0_10px_rgba(136,204,255,0.3)]">{isPlaying ? <PauseIcon /> : <PlayIcon />}</button>
-                </>
-            );
-        };
-        // --- END: components ---
-
-        // --- START: App.tsx ---
+        // --- React Components ---
         const App = () => {
             const [isLoading, setIsLoading] = useState(true);
-            const [loadingMessage, setLoadingMessage] = useState('Summoning Winter Magic...');
             const [mode, setMode] = useState(InteractionMode.TREE);
-            const [photos, setPhotos] = useState([]);
             const [handDetected, setHandDetected] = useState(false);
-            const canvasContainerRef = useRef(null);
-            const videoRef = useRef(null);
-            const webcamCanvasRef = useRef(null);
-            
-            const handleGestureChange = useCallback((newMode, detected) => {
-                setMode(newMode);
-                setHandDetected(detected);
-            }, []);
+            const containerRef = useRef();
+            const videoRef = useRef();
+            const canvasRef = useRef();
+            const sceneRef = useRef();
 
-            const handleModeChangeRequest = useCallback((newMode) => {
-                setMode(newMode);
-            }, []);
-
-            const { gestureManager } = useMediaPipe({ videoRef, canvasRef: webcamCanvasRef, onGestureChange: handleGestureChange, onLoaded: () => setLoadingMessage('Initializing 3D Scene...') });
-            const { sceneManager } = useThreeScene({ containerRef: canvasContainerRef, mode, photos, gestureManager, onModeChangeRequest: handleModeChangeRequest });
+            const { gestureManager } = useMediaPipe({
+                videoRef, canvasRef, 
+                onGestureChange: (m, d) => { setMode(m); setHandDetected(d); },
+                onLoaded: () => setIsLoading(false)
+            });
 
             useEffect(() => {
-                if (gestureManager && sceneManager) setTimeout(() => setIsLoading(false), 1000);
-            }, [gestureManager, sceneManager]);
-
-            const handleFilesSelected = (files) => {
-                if (files.length > 0) setPhotos(Array.from(files).map(file => URL.createObjectURL(file)));
-            };
+                if (!containerRef.current) return;
+                sceneRef.current = new SceneController(containerRef.current);
+                const loop = () => {
+                    if (sceneRef.current) sceneRef.current.animate(mode, gestureManager);
+                    requestAnimationFrame(loop);
+                };
+                loop();
+            }, []);
 
             return (
-                <div className="relative w-screen h-screen overflow-hidden bg-[#020210]">
-                    {isLoading && <Loader message={loadingMessage} />}
-                    <div ref={canvasContainerRef} className="absolute top-0 left-0 w-full h-full" />
-                    <UILayer onFilesSelected={handleFilesSelected} />
-                    <GestureIndicator isVisible={!isLoading} handDetected={handDetected} currentMode={mode} />
-                    <WebcamPreview videoRef={videoRef} canvasRef={webcamCanvasRef} />
-                    <AudioPlayer />
+                <div className="w-full h-screen relative bg-black">
+                    {isLoading && (
+                        <div className="absolute inset-0 z-50 bg-[#020210] flex flex-col items-center justify-center">
+                            <div className="spinner w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full"></div>
+                            <p className="text-cyan-300 mt-4 tracking-widest">LOADING MAGIC...</p>
+                        </div>
+                    )}
+                    
+                    <div ref={containerRef} className="w-full h-full" />
+                    
+                    <div className="absolute top-10 w-full text-center pointer-events-none">
+                        <h1 className="text-6xl font-great-vibes text-cyan-100 text-glow">Frozen Wonderland</h1>
+                        <p className="text-cyan-400 mt-2 tracking-[0.3em] text-sm uppercase">
+                            {handDetected ? `Mode: ${mode}` : "Raise your hand to start"}
+                        </p>
+                    </div>
+
+                    <div className="absolute bottom-8 right-8 w-48 h-36 bg-black border border-cyan-900 rounded-lg overflow-hidden shadow-2xl">
+                        <video ref={videoRef} className="hidden" playsInline muted />
+                        <canvas ref={canvasRef} className="w-full h-full object-cover scale-x-[-1]" />
+                    </div>
                 </div>
             );
         };
-        // --- END: App.tsx ---
 
-        // --- START: index.tsx (render logic) ---
-        const rootElement = document.getElementById('root');
-        const root = ReactDOM.createRoot(rootElement);
-        root.render(<App />);
-        // --- END: index.tsx ---
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
     </script>
 </body>
 </html>
