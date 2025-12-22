@@ -712,7 +712,10 @@
                     if (STATE.mode !== 'FOCUS') {
                         STATE.mode = 'FOCUS';
                         if (photoParticles.length > 0) {
-                            STATE.focusTarget = photoParticles[Math.floor(Math.random() * photoParticles.length)].mesh;
+                            // Avoid re-selecting if a target is already chosen and animating
+                            if (!STATE.focusTarget) {
+                                STATE.focusTarget = photoParticles[Math.floor(Math.random() * photoParticles.length)].mesh;
+                            }
                         }
                     }
                 } else if (scatterDist > 0.4) { // Threshold for "open" hand
@@ -748,10 +751,10 @@
                 const files = e.target.files;
                 if (!files || !files.length) return;
 
+                // On the very first user upload, clear the default placeholder photos.
                 if (!hasUserUploadedPhotos) {
-                    // Clear default placeholder photos only on the first user upload
-                    for (let i = photoParticles.length - 1; i >= 0; i--) {
-                        const p = photoParticles[i];
+                    // Dispose of old photo assets to prevent memory leaks.
+                    photoParticles.forEach(p => {
                         if (p.mesh) {
                             p.mesh.traverse((child) => {
                                 if (child.isMesh) {
@@ -762,62 +765,59 @@
                             });
                             photoMeshGroup.remove(p.mesh);
                         }
-                    }
-                    photoParticles.length = 0; // Clear the array
+                    });
+                    photoParticles.length = 0; // Clear the array of photo data.
                     hasUserUploadedPhotos = true;
                 }
 
                 const loader = new THREE.TextureLoader();
                 const filesToAdd = Array.from(files);
 
+                // Load all selected image files concurrently.
                 const loadPromises = filesToAdd.map(file => {
                     return new Promise((resolve, reject) => {
                         const url = URL.createObjectURL(file);
-                        loader.load(
-                            url,
-                            (texture) => {
+                        loader.load(url,
+                            (texture) => { // Success
                                 texture.colorSpace = THREE.SRGBColorSpace;
                                 URL.revokeObjectURL(url);
                                 resolve(texture);
                             },
-                            undefined,
-                            (err) => {
+                            undefined, // Progress
+                            (err) => { // Error
                                 console.error('Error loading texture:', err);
                                 URL.revokeObjectURL(url);
-                                reject(err); // Reject promise on error
+                                reject(err);
                             }
                         );
                     });
                 });
 
+                // Once all new images are loaded...
                 Promise.all(loadPromises.map(p => p.catch(e => e))) // Continue even if some images fail
                     .then(results => {
                         const validTextures = results.filter(r => r instanceof THREE.Texture);
                         
+                        // Add a new photo object to the scene for each valid texture.
                         validTextures.forEach(texture => {
                             addPhotoToScene(texture);
                         });
 
-                        // If total photos exceed 12, remove the oldest ones
+                        // Enforce the 12-photo limit.
                         if (photoParticles.length > 12) {
                             const toRemoveCount = photoParticles.length - 12;
+                            // Remove the oldest photos from the beginning of the array.
                             const removedPhotos = photoParticles.splice(0, toRemoveCount);
                             
+                            // Clean up the assets of the removed photos.
                             removedPhotos.forEach(p => {
                                 if (p.mesh) {
                                     p.mesh.traverse((child) => {
                                         if (child.isMesh) {
                                             if (child.geometry) child.geometry.dispose();
                                             if (child.material) {
-                                                if (Array.isArray(child.material)) {
-                                                    child.material.forEach(material => {
-                                                        if (material.map) material.map.dispose();
-                                                        material.dispose();
-                                                    });
-                                                } else {
-                                                    if (child.material.map) child.material.map.dispose();
-                                                    child.material.dispose();
-                                                }
+                                                if (child.material.map) child.material.map.dispose();
+                                                child.material.dispose();
                                             }
                                         }
                                     });
@@ -826,6 +826,9 @@
                             });
                         }
                     });
+                
+                // Reset the input so the user can select the same file again if they wish.
+                e.target.value = '';
             });
         }
 
@@ -885,17 +888,16 @@
             const targetCameraZ = (STATE.mode === 'SCATTER') ? CONFIG.camera.zScatter : CONFIG.camera.z;
             camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCameraZ, dt * 2.0);
 
-            // Updated rotation logic
+            // --- Corrected Rotation Logic ---
             if (STATE.mode === 'FOCUS') {
-                // In FOCUS mode, smoothly bring rotation to a halt to stabilize the view
-                STATE.rotation.x = THREE.MathUtils.lerp(STATE.rotation.x, 0, 3.0 * dt);
+                // In FOCUS mode, do not apply any new rotation. The tree will stop spinning.
             } else if (STATE.mode === 'SCATTER' && STATE.hand.detected) {
                 const targetRotY = STATE.hand.x * Math.PI * 0.9;
                 const targetRotX = STATE.hand.y * Math.PI * 0.25;
-                STATE.rotation.y += (targetRotY - STATE.rotation.y) * 3.0 * dt;
-                STATE.rotation.x += (targetRotX - STATE.rotation.x) * 3.0 * dt;
+                STATE.rotation.y = THREE.MathUtils.lerp(STATE.rotation.y, targetRotY, 3.0 * dt);
+                STATE.rotation.x = THREE.MathUtils.lerp(STATE.rotation.x, targetRotX, 3.0 * dt);
             } else {
-                // Default rotation for TREE or SCATTER without hand
+                // Default rotation for TREE mode or SCATTER without hand detection.
                 const baseRotationSpeed = (STATE.mode === 'TREE') ? 0.3 : 0.1;
                 STATE.rotation.y += baseRotationSpeed * dt;
                 STATE.rotation.x = THREE.MathUtils.lerp(STATE.rotation.x, 0, 2.0 * dt);
@@ -937,23 +939,28 @@
             const invMatrix = new THREE.Matrix4().copy(mainGroup.matrixWorld).invert();
             lookAtTarget.applyMatrix4(invMatrix);
 
+            // --- Corrected Photo Animation Logic ---
             photoParticles.forEach(p => {
                 const frameMesh = p.mesh.children[0];
                 if (STATE.mode === 'FOCUS' && p.mesh === STATE.focusTarget) {
-                    frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.8, dt * 5);
+                    frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.8, 5.0 * dt);
                     
+                    // Define a stable target position in front of the camera, then convert it to the main group's local space.
+                    // This ensures the target doesn't move even if the group has residual rotation.
                     const targetPos = new THREE.Vector3(0, 1.5, camera.position.z - 15);
                     const invGroupMatrix = new THREE.Matrix4().copy(mainGroup.matrixWorld).invert();
                     targetPos.applyMatrix4(invGroupMatrix);
 
-                    p.mesh.position.lerp(targetPos, 2.5 * dt);
+                    // Animate position, rotation (quaternion), and scale smoothly.
+                    p.mesh.position.lerp(targetPos, 2.0 * dt);
                     p.mesh.quaternion.slerp(new THREE.Quaternion().setFromRotationMatrix(
                         new THREE.Matrix4().lookAt(p.mesh.position, lookAtTarget, p.mesh.up)
-                    ), 0.1);
-                    p.mesh.scale.lerp(new THREE.Vector3(5, 5, 5), 2.5 * dt);
+                    ), 2.0 * dt);
+                    p.mesh.scale.lerp(new THREE.Vector3(5, 5, 5), 2.0 * dt);
 
                 } else {
-                    frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.0, dt * 5);
+                    // Animate photos back to their default state.
+                    frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.0, 5.0 * dt);
                     const target = (STATE.mode === 'TREE' || STATE.mode === 'FOCUS') ? p.posTree : p.posScatter;
                     p.mesh.position.lerp(target, 2.0 * dt);
                     
@@ -961,11 +968,11 @@
                         p.mesh.rotation.x += p.spinSpeed.x * dt;
                         p.mesh.rotation.y += p.spinSpeed.y * dt;
                     } else {
-                        p.mesh.quaternion.slerp(new THREE.Quaternion(0,0,0,1), 0.1);
+                         p.mesh.quaternion.slerp(new THREE.Quaternion(0,0,0,1), 2.0 * dt);
                     }
                     
                     const s = (STATE.mode === 'SCATTER') ? 1.5 : p.baseScale;
-                    p.mesh.scale.lerp(new THREE.Vector3(s,s,s), 4*dt);
+                    p.mesh.scale.lerp(new THREE.Vector3(s,s,s), 4.0 * dt);
                 }
             });
 
