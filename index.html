@@ -554,8 +554,6 @@
             });
             const photo = new THREE.Mesh(photoGeo, photoMat);
             photo.position.z = 0.04;
-            // THIS IS THE FIX: Rotate the photo plane so its front faces the -Z direction.
-            photo.rotation.y = Math.PI;
 
             const group = new THREE.Group();
             group.add(frame);
@@ -877,6 +875,8 @@
         }
 
         const tempMatrix = new THREE.Matrix4();
+        const yAxisForPhotoRotation = new THREE.Vector3(0, 1, 0);
+        const correctionQuaternion = new THREE.Quaternion().setFromAxisAngle(yAxisForPhotoRotation, Math.PI);
         
         function animate() {
             requestAnimationFrame(animate);
@@ -958,6 +958,10 @@
                     const targetQuaternion = new THREE.Quaternion();
                     tempMatrix.lookAt(p.mesh.position, lookAtTarget, p.mesh.up);
                     targetQuaternion.setFromRotationMatrix(tempMatrix);
+
+                    // NEW GUARANTEED FIX: Apply 180-degree correction to the final orientation
+                    targetQuaternion.multiply(correctionQuaternion);
+
                     p.mesh.quaternion.slerp(targetQuaternion, 2.0 * dt);
                     
                     p.mesh.scale.lerp(new THREE.Vector3(5, 5, 5), 2.0 * dt);
@@ -1005,3 +1009,4 @@
     </script>
 </body>
 </html>
+```
