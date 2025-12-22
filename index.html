@@ -1,15 +1,19 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Frozen Winter Wonderland - Optimized 5 Photos</title>
+    <title>Frozen Winter Wonderland - 12 Photos & Music</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Great+Vibes&display=swap" rel="stylesheet">
+
     <style>
-        /* 1. 配色方案：背景改为午夜蓝/深黑 */
         body { margin: 0; overflow: hidden; background-color: #020210; font-family: 'Times New Roman', serif; }
         #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
         
-        /* UI Overlay */
         #ui-layer {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             z-index: 10; pointer-events: none;
@@ -19,7 +23,6 @@
             box-sizing: border-box;
         }
         
-        /* Loading */
         #loader {
             position: absolute; top: 0; left: 0; width: 100%; height: 100%;
             background: #020210; z-index: 100;
@@ -39,7 +42,6 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* Typography */
         h1 { 
             color: #e0f7fa; 
             font-size: 80px; 
@@ -63,7 +65,6 @@
             text-shadow: 0 0 50px rgba(136, 204, 255, 1.0), 0 0 80px rgba(255, 255, 255, 0.8); 
         }
 
-        /* Hand Detection Warning */
         #hand-warning {
             position: absolute; top: 20px; left: 20px;
             color: #ccffff; font-size: 14px; font-weight: 100; 
@@ -76,10 +77,6 @@
             box-shadow: 0 0 10px rgba(136, 204, 255, 0.2);
         }
 
-        #upload-ui { display: none; }
-        #file-input { display: none; }
-
-        /* Webcam feedback */
         #webcam-wrapper {
             position: absolute; bottom: 40px; right: 40px;
             width: 120px; height: 90px;
@@ -87,13 +84,16 @@
             box-shadow: 0 0 10px rgba(136, 204, 255, 0.1);
             overflow: hidden; opacity: 0;
             pointer-events: none;
+            transition: opacity 0.5s;
+        }
+        
+        #webcam-preview {
+             transform: scaleX(-1);
         }
 
-        /* Fullscreen Button */
-        #fullscreen-btn {
+        #fullscreen-btn, #music-btn {
             position: absolute;
             bottom: 30px;
-            right: 30px;
             width: 40px;
             height: 40px;
             background: rgba(2, 2, 16, 0.5);
@@ -107,22 +107,19 @@
             transition: all 0.3s ease;
             backdrop-filter: blur(4px);
         }
-        #fullscreen-btn:hover {
+        #fullscreen-btn:hover, #music-btn:hover {
             background: rgba(136, 204, 255, 0.2);
             border-color: #88ccff;
             box-shadow: 0 0 10px rgba(136, 204, 255, 0.3);
         }
-        #fullscreen-btn svg {
-            width: 24px;
-            height: 24px;
+        #fullscreen-btn svg, #music-btn svg {
             fill: #ccffff;
             filter: drop-shadow(0 0 2px rgba(204, 255, 255, 0.5));
         }
-
-    </style>
-    
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Great+Vibes&display=swap');
+        #fullscreen-btn { right: 80px; }
+        #music-btn { right: 30px; }
+        #fullscreen-btn svg { width: 24px; height: 24px; }
+        #music-btn svg { width: 20px; height: 20px; }
     </style>
 
     <script type="importmap">
@@ -157,6 +154,15 @@
         </svg>
     </div>
 
+    <div id="music-btn" title="Upload Music">
+        <svg viewBox="0 0 24 24">
+            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+        </svg>
+    </div>
+
+    <input type="file" id="music-input" accept="audio/*" style="display: none;">
+    <audio id="background-music" loop></audio>
+
     <input type="file" id="file-input" multiple accept="image/*" style="display: none;">
 
     <div id="webcam-wrapper">
@@ -185,7 +191,7 @@
             },
             particles: {
                 count: 1500,     
-                dustCount: 2000, // 稍微减少数量以提升性能，原为3000
+                dustCount: 2000,
                 treeHeight: 24,  
                 treeRadius: 8    
             },
@@ -207,19 +213,17 @@
         let mainGroup; 
         let clock = new THREE.Clock();
         
-        // 核心数据结构重构：分离数据与Mesh
-        let particlesData = []; // 存储所有普通粒子的位置/状态数据
-        let dustData = [];      // 存储雪花数据
-        let photoParticles = []; // 存储照片粒子对象（照片不能 Instance，依然是 Mesh）
+        let particlesData = [];
+        let dustData = [];
+        let photoParticles = [];
         
         let photoMeshGroup = new THREE.Group();
         let spiralMesh; 
         let handLandmarker, video, webcamCanvas, webcamCtx;
         let snowflakeTexture; 
 
-        // InstancedMesh 引用
         let instancedIce, instancedSnow, instancedFlake, instancedGlow, instancedDust;
-        let dummy = new THREE.Object3D(); // 用于计算 Instance 矩阵
+        let dummy = new THREE.Object3D();
 
         async function init() {
             initThree();
@@ -227,19 +231,16 @@
             setupLights(); 
             createTextures(); 
             
-            // 优化：改用 InstancedMesh 创建粒子
             createInstancedParticles(); 
-            
             createSpiralRibbon(); 
-            
-            // 优化：改用 InstancedMesh 创建飘雪
             createInstancedDust(); 
-            
             createDefaultPhotos(); 
+            
             setupPostProcessing(); 
             setupEvents();
             setupUploadHandler(); 
             setupFullscreen(); 
+            setupMusicUploader();
             await initMediaPipe();
             
             const loader = document.getElementById('loader');
@@ -258,10 +259,9 @@
             camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 2, CONFIG.camera.z); 
 
-            // 优化：关闭 anti-alias 可以显著提升性能，高分屏下几乎无损
             renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // 限制像素比
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
             renderer.toneMapping = THREE.ReinhardToneMapping; 
             renderer.toneMappingExposure = 2.0; 
             container.appendChild(renderer.domElement);
@@ -272,7 +272,7 @@
 
         function setupEnvironment() {
             const pmremGenerator = new THREE.PMREMGenerator(renderer);
-            scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
+            scene.environment = pmremGenerator.fromScene(new RoomEnvironment(renderer), 0.04).texture;
         }
 
         function setupLights() {
@@ -312,14 +312,14 @@
 
         function createTextures() {
             const canvas = document.createElement('canvas');
-            canvas.width = 64; canvas.height = 64; // 优化：减小纹理尺寸
+            canvas.width = 64; canvas.height = 64;
             const ctx = canvas.getContext('2d');
             
             ctx.fillStyle = '#00000000'; 
             ctx.clearRect(0,0,64,64);
             
             ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 4; // 调整线宽适应小尺寸
+            ctx.lineWidth = 4;
             ctx.lineCap = 'round';
             
             ctx.translate(32, 32);
@@ -342,7 +342,7 @@
             const height = CONFIG.particles.treeHeight;
             const maxRadius = CONFIG.particles.treeRadius + 2.5; 
             const turns = 5; 
-            const pointsCount = 200; // 适当减少分段数
+            const pointsCount = 200;
 
             const points = [];
             
@@ -362,7 +362,7 @@
 
             const curve = new THREE.CatmullRomCurve3(points);
             
-            const geometry = new THREE.TubeGeometry(curve, 200, 0.06, 6, false); // 减少径向分段
+            const geometry = new THREE.TubeGeometry(curve, 200, 0.06, 6, false);
             
             const material = new THREE.MeshBasicMaterial({
                 color: CONFIG.colors.stream,
@@ -376,14 +376,11 @@
             mainGroup.add(spiralMesh);
         }
 
-        // --- 核心优化：InstancedMesh ---
         function createInstancedParticles() {
-            // 优化：降低几何体细分
             const iceGeo = new THREE.IcosahedronGeometry(0.4, 0); 
             const snowGeo = new THREE.SphereGeometry(0.4, 8, 8); 
             const flakeGeo = new THREE.PlaneGeometry(0.8, 0.8);
 
-            // 保持原有材质
             const iceMat = new THREE.MeshPhysicalMaterial({
                 color: CONFIG.colors.iceBlue,
                 metalness: 0.1, roughness: 0.1, transmission: 0.9, thickness: 1.0, ior: 1.5,
@@ -403,7 +400,6 @@
             });
 
             const count = CONFIG.particles.count;
-            // 预估数量
             const countIce = Math.floor(count * 0.4);
             const countSnow = Math.floor(count * 0.3);
             const countFlake = Math.floor(count * 0.2);
@@ -419,7 +415,6 @@
             mainGroup.add(instancedFlake);
             mainGroup.add(instancedGlow);
 
-            // 填充数据
             let idxIce=0, idxSnow=0, idxFlake=0, idxGlow=0;
 
             for (let i = 0; i < count; i++) {
@@ -431,7 +426,6 @@
                 else if (rand < 0.90) { type = 'FLAKE'; meshRef = instancedFlake; index = idxFlake++; }
                 else { type = 'GLOW'; meshRef = instancedGlow; index = idxGlow++; }
 
-                // 计算位置
                 const h = CONFIG.particles.treeHeight;
                 let t = Math.random(); 
                 t = Math.pow(t, 0.8); 
@@ -458,7 +452,6 @@
                     (Math.random() - 0.5) * 1.5
                 );
 
-                // 保存数据供动画循环使用
                 particlesData.push({
                     type, index, meshRef,
                     posTree, posScatter,
@@ -470,7 +463,6 @@
                 });
             }
 
-            // 顶部星星单独创建
             createTopStar();
             mainGroup.add(photoMeshGroup);
         }
@@ -498,7 +490,6 @@
 
             const star = new THREE.Mesh(starGeo, starMat);
             star.position.set(0, CONFIG.particles.treeHeight/2 + 1.2, 0);
-            scene.add(star); 
             mainGroup.add(star);
             
             const starLight = new THREE.PointLight(CONFIG.colors.cyan, 2, 10);
@@ -541,7 +532,6 @@
             }
         }
 
-        // 照片依然是独立的 Mesh
         function addPhotoToScene(texture) {
             const frameGeo = new THREE.BoxGeometry(1.3, 1.3, 0.05);
             const frameMat = new THREE.MeshStandardMaterial({ 
@@ -573,16 +563,15 @@
             
             photoMeshGroup.add(group);
             
-            // 为照片创建一个数据对象
             const h = CONFIG.particles.treeHeight;
             let t = Math.random(); t = Math.pow(t, 0.8); 
             const y = (t * h) - h/2;
-            let rMax = CONFIG.particles.treeRadius * (1.0 - t); if (rMax < 0.5) rMax = 0.5;
-            const angle = t * 50 * Math.PI + Math.random() * Math.PI; 
-            const r = rMax * (0.8 + Math.random() * 0.4);
+            let rMax = CONFIG.particles.treeRadius * (1.0 - t) + 2;
+            const angle = Math.random() * Math.PI * 2; 
+            const r = rMax * (0.8 + Math.random() * 0.2);
             const posTree = new THREE.Vector3(Math.cos(angle)*r, y, Math.sin(angle)*r);
 
-            let rScatter = 6 + Math.random() * 8; 
+            let rScatter = 10 + Math.random() * 12; 
             const theta = Math.random() * Math.PI * 2;
             const phi = Math.acos(2 * Math.random() - 1);
             const posScatter = new THREE.Vector3(
@@ -605,21 +594,10 @@
         }
 
         function createDefaultPhotos() {
-            const loader = new THREE.TextureLoader();
-            const imageFiles = ['unnamed.jpg', 'unnamed%20(1).jpg', 'unnamed%20(2).jpg', 'unnamed%20(3).jpg', 'unnamed%20(4).jpg'];
-
-            imageFiles.forEach((imgSrc, index) => {
-                loader.load(imgSrc, 
-                    (texture) => {
-                        texture.colorSpace = THREE.SRGBColorSpace;
-                        addPhotoToScene(texture);
-                    }, 
-                    undefined, 
-                    (err) => {
-                        createFallbackPhoto(index + 1);
-                    }
-                );
-            });
+            // Updated to create 12 fallback photos by default.
+            for (let i = 0; i < 12; i++) {
+                createFallbackPhoto(i + 1);
+            }
         }
 
         function createFallbackPhoto(index) {
@@ -662,50 +640,41 @@
                 numHands: 1
             });
             
-            if (navigator.mediaDevices?.getUserMedia) {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                video.srcObject = stream;
-                video.addEventListener("loadeddata", predictWebcam);
+            try {
+                 if (navigator.mediaDevices?.getUserMedia) {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                    video.srcObject = stream;
+                    video.addEventListener("loadeddata", predictWebcam);
+                }
+            } catch(err) {
+                console.error("Could not access webcam.", err);
+                const warningEl = document.getElementById('hand-warning');
+                warningEl.innerText = 'WEBCAM NOT FOUND';
+                warningEl.style.display = 'block';
             }
         }
 
         let lastVideoTime = -1;
         async function predictWebcam() {
+            if (video.videoWidth > 0) {
+                 document.getElementById('webcam-wrapper').style.opacity = '1';
+            }
             if (video.currentTime !== lastVideoTime) {
                 lastVideoTime = video.currentTime;
                 if (handLandmarker) {
                     const result = handLandmarker.detectForVideo(video, performance.now());
                     
-                    // --- 视频框渲染 ---
                     webcamCtx.save();
                     webcamCtx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
-                    
                     webcamCtx.scale(-1, 1);
                     webcamCtx.translate(-webcamCanvas.width, 0);
                     webcamCtx.drawImage(video, 0, 0, webcamCanvas.width, webcamCanvas.height);
-                    
-                    if (result.landmarks) {
-                        for (const landmarks of result.landmarks) {
-                            drawLandmarks(landmarks, webcamCtx);
-                        }
-                    }
                     webcamCtx.restore();
 
                     processGestures(result);
                 }
             }
             requestAnimationFrame(predictWebcam);
-        }
-
-        function drawLandmarks(landmarks, ctx) {
-            ctx.fillStyle = "#00ffff";
-            for (const lm of landmarks) {
-                const x = lm.x * webcamCanvas.width;
-                const y = lm.y * webcamCanvas.height;
-                ctx.beginPath();
-                ctx.arc(x, y, 2, 0, 2 * Math.PI);
-                ctx.fill();
-            }
         }
 
         function processGestures(result) {
@@ -729,16 +698,16 @@
                 if (pinchDist < 0.05) {
                     if (STATE.mode !== 'FOCUS') {
                         STATE.mode = 'FOCUS';
-                        const photos = photoParticles; // 使用 photoParticles
+                        const photos = photoParticles;
                         if (photos.length) {
                             STATE.focusTarget = photos[Math.floor(Math.random()*photos.length)].mesh;
                         }
                     }
-                } else if (avgDist < 0.25) {
-                    STATE.mode = 'TREE';
-                    STATE.focusTarget = null;
                 } else if (avgDist > 0.4) {
                     STATE.mode = 'SCATTER';
+                    STATE.focusTarget = null;
+                } else {
+                    STATE.mode = 'TREE';
                     STATE.focusTarget = null;
                 }
             } else {
@@ -767,11 +736,10 @@
                 const files = e.target.files;
                 if (!files.length) return;
                 
-                // 清理旧照片
                 for (let i = photoParticles.length - 1; i >= 0; i--) {
                     photoMeshGroup.remove(photoParticles[i].mesh);
                 }
-                photoParticles = []; // 清空数组
+                photoParticles = [];
 
                 const loader = new THREE.TextureLoader();
                 Array.from(files).forEach(file => {
@@ -779,6 +747,7 @@
                     loader.load(url, (texture) => {
                         texture.colorSpace = THREE.SRGBColorSpace;
                         addPhotoToScene(texture);
+                        URL.revokeObjectURL(url);
                     });
                 });
             });
@@ -799,19 +768,44 @@
             });
         }
 
+        function setupMusicUploader() {
+            const musicBtn = document.getElementById('music-btn');
+            const musicInput = document.getElementById('music-input');
+            const audioPlayer = document.getElementById('background-music');
+
+            if (musicBtn && musicInput && audioPlayer) {
+                musicBtn.addEventListener('click', () => {
+                    musicInput.click();
+                });
+
+                musicInput.addEventListener('change', (event) => {
+                    const files = event.target.files;
+                    if (files && files.length > 0) {
+                        const file = files[0];
+                        const objectURL = URL.createObjectURL(file);
+                        audioPlayer.src = objectURL;
+                        const playPromise = audioPlayer.play();
+                        if (playPromise !== undefined) {
+                            playPromise.catch(error => {
+                                console.error("Audio playback was prevented:", error);
+                            });
+                        }
+                    }
+                });
+            }
+        }
+
         function animate() {
             requestAnimationFrame(animate);
             const dt = clock.getDelta();
             const time = clock.elapsedTime;
 
-            // 螺旋线逻辑：只在 TREE 模式显示
             if (spiralMesh) {
                 const targetOpacity = (STATE.mode === 'TREE') ? 0.95 : 0;
                 spiralMesh.material.opacity = THREE.MathUtils.lerp(spiralMesh.material.opacity, targetOpacity, dt * 3);
                 spiralMesh.visible = spiralMesh.material.opacity > 0.01;
             }
 
-            // SCATTER 模式拉远镜头
             const targetCameraZ = (STATE.mode === 'SCATTER') ? CONFIG.camera.zScatter : CONFIG.camera.z;
             camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCameraZ, dt * 2.0);
 
@@ -823,27 +817,19 @@
             } else {
                 if(STATE.mode === 'TREE') {
                     STATE.rotation.y += 0.3 * dt;
-                    STATE.rotation.x += (0 - STATE.rotation.x) * 2.0 * dt;
-                } else if (STATE.mode === 'FOCUS') {
-                    // 聚焦
                 } else {
                      STATE.rotation.y += 0.1 * dt; 
                 }
+                STATE.rotation.x = THREE.MathUtils.lerp(STATE.rotation.x, 0, dt * 2.0);
             }
 
             mainGroup.rotation.y = STATE.rotation.y;
             mainGroup.rotation.x = STATE.rotation.x;
 
-            // --- 更新 Instanced Particles ---
-            // 只有当粒子位置变化时才更新矩阵（这里为了 Scatter 动画，每一帧都更新）
             particlesData.forEach(p => {
-                let target;
-                if (STATE.mode === 'SCATTER') target = p.posScatter;
-                else target = p.posTree;
-
+                let target = (STATE.mode === 'SCATTER') ? p.posScatter : p.posTree;
                 p.currentPos.lerp(target, 2.0 * dt);
                 
-                // 旋转和闪烁
                 if (STATE.mode === 'SCATTER') {
                     const twinkle = 1.0 + Math.sin(time * 10.0 + p.randomPhase) * 0.4;
                     p.currentScale = THREE.MathUtils.lerp(p.currentScale, p.baseScale * twinkle, dt * 10);
@@ -863,56 +849,54 @@
                 p.meshRef.setMatrixAt(p.index, dummy.matrix);
             });
 
-            // 标记 InstancedMesh 需要更新
             instancedIce.instanceMatrix.needsUpdate = true;
             instancedSnow.instanceMatrix.needsUpdate = true;
             instancedFlake.instanceMatrix.needsUpdate = true;
             instancedGlow.instanceMatrix.needsUpdate = true;
 
-            // --- 更新照片 (普通 Mesh) ---
             photoParticles.forEach(p => {
                 const frameMesh = p.mesh.children[0];
                 if (STATE.mode === 'FOCUS' && p.mesh === STATE.focusTarget) {
                     frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.8, dt * 5);
                     const invMatrix = new THREE.Matrix4().copy(mainGroup.matrixWorld).invert();
-                    const target = new THREE.Vector3(0, 2, 40).applyMatrix4(invMatrix);
-                    p.mesh.position.lerp(target, 5.0 * dt);
+                    const targetPos = new THREE.Vector3(0, 2, camera.position.z - 12);
+                    camera.localToWorld(targetPos);
+                    targetPos.applyMatrix4(invMatrix);
+
+                    p.mesh.position.lerp(targetPos, 5.0 * dt);
                     p.mesh.lookAt(camera.position);
                     p.mesh.scale.lerp(new THREE.Vector3(3.6,3.6,3.6), 4*dt);
                 } else {
                     frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.0, dt * 5);
-                    const target = (STATE.mode === 'TREE') ? p.posTree : p.posScatter;
+                    const target = (STATE.mode === 'TREE' || STATE.mode === 'FOCUS') ? p.posTree : p.posScatter;
                     p.mesh.position.lerp(target, 2.0 * dt);
                     
-                    if (STATE.mode !== 'TREE') {
+                    if (STATE.mode === 'SCATTER') {
                         p.mesh.rotation.x += p.spinSpeed.x * dt;
                         p.mesh.rotation.y += p.spinSpeed.y * dt;
                     } else {
-                        p.mesh.rotation.x = THREE.MathUtils.lerp(p.mesh.rotation.x, 0, dt);
+                        p.mesh.rotation.x = THREE.MathUtils.lerp(p.mesh.rotation.x, 0, dt * 4);
+                        p.mesh.rotation.y = THREE.MathUtils.lerp(p.mesh.rotation.y, 0, dt * 4);
+                        p.mesh.rotation.z = THREE.MathUtils.lerp(p.mesh.rotation.z, 0, dt * 4);
                     }
                     
-                    const s = (STATE.mode === 'SCATTER') ? 2.5 : p.baseScale;
+                    const s = (STATE.mode === 'SCATTER') ? 1.5 : p.baseScale;
                     p.mesh.scale.lerp(new THREE.Vector3(s,s,s), 4*dt);
                 }
             });
 
-            // --- 更新飘雪 (InstancedMesh) ---
-            // 优化2：移除加速逻辑
-            const speedMultiplier = 1.0; 
-
             dustData.forEach(d => {
-                d.yOffset -= d.fallSpeed * dt * speedMultiplier;
-                const boundary = CONFIG.particles.treeHeight;
+                d.yOffset -= d.fallSpeed * dt;
+                const boundary = CONFIG.particles.treeHeight * 1.5;
                 if (d.yOffset < -boundary) d.yOffset = boundary;
 
-                // 移除握拳狂乱效果
                 const x = d.pos.x + Math.sin(time + d.id) * 0.05;
                 const z = d.pos.z + Math.cos(time + d.id) * 0.05;
                 const y = d.pos.y + d.yOffset;
-                d.rotation += dt;
+                d.rotation += dt * 0.5;
 
                 dummy.position.set(x, y, z);
-                dummy.rotation.set(d.rotation, d.rotation, d.rotation);
+                dummy.rotation.set(0, 0, d.rotation);
                 dummy.scale.setScalar(d.scale);
                 dummy.updateMatrix();
                 instancedDust.setMatrixAt(d.id, dummy.matrix);
