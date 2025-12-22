@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -188,21 +189,36 @@
             useEffect(() => {
                 const initialize = async () => {
                     try {
-                        const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm");
+                        const wasmPath = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm";
+                        const modelPath = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+                        
                         let handLandmarker;
                         try {
-                            handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                                baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`, delegate: "GPU" },
-                                runningMode: "VIDEO", numHands: 1
+                            // Attempt to initialize with GPU, using the modern wasmFilesDirectory option
+                            handLandmarker = await HandLandmarker.createFromOptions({
+                                baseOptions: {
+                                    modelAssetPath: modelPath,
+                                    delegate: "GPU",
+                                    wasmFilesDirectory: wasmPath
+                                },
+                                runningMode: "VIDEO",
+                                numHands: 1
                             });
                         } catch (gpuError) {
                             console.warn("GPU delegate for HandLandmarker failed. Falling back to CPU.", gpuError);
-                            handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                                baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`, delegate: "CPU" },
-                                runningMode: "VIDEO", numHands: 1
+                            // Fallback to CPU if GPU fails
+                            handLandmarker = await HandLandmarker.createFromOptions({
+                                baseOptions: {
+                                    modelAssetPath: modelPath,
+                                    delegate: "CPU",
+                                    wasmFilesDirectory: wasmPath
+                                },
+                                runningMode: "VIDEO",
+                                numHands: 1
                             });
                         }
                         handLandmarkerRef.current = handLandmarker;
+                        
                         if (navigator.mediaDevices?.getUserMedia) {
                             const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240 } });
                             if (videoRef.current) {
