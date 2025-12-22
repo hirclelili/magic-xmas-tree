@@ -3,16 +3,10 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Interactive Frozen Christmas Tree - Hand Optimized</title>
-    
+    <title>Frozen Wonderland - Gesture Click Optimized</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Great+Vibes&display=swap" rel="stylesheet">
-    
     <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
-
     <style>
       body { background-color: #020210; font-family: 'Cinzel', serif; margin: 0; overflow: hidden; }
       .font-great-vibes { font-family: 'Great Vibes', cursive; }
@@ -21,7 +15,6 @@
       @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
       #preview-canvas { transform: scaleX(-1); border: 2px solid #00ffff; }
     </style>
-
     <script type="importmap">
     {
       "imports": {
@@ -56,7 +49,7 @@
 
         const InteractionMode = { TREE: 'TREE', SCATTER: 'SCATTER', FOCUS: 'FOCUS' };
 
-        // --- Optimized useMediaPipe Hook ---
+        // --- Optimized useMediaPipe Hook (Gesture Click Logic) ---
         const useMediaPipe = ({ videoRef, canvasRef, onGestureChange, onLoaded }) => {
             const landmarkerRef = useRef(null);
             const handPositionRef = useRef({ x: 0, y: 0 });
@@ -83,7 +76,6 @@
                         const lm = results.landmarks[0];
                         new DrawingUtils(ctx).drawLandmarks(lm, { color: '#00ffff', radius: 2 });
                         
-                        // Optimized Gesture Calculation
                         const wrist = lm[0];
                         const middleMcp = lm[9];
                         const handSize = Math.max(0.01, Math.hypot(wrist.x - middleMcp.x, wrist.y - middleMcp.y));
@@ -93,10 +85,15 @@
                         [8, 12, 16, 20].forEach(idx => tipsDist += Math.hypot(lm[idx].x - lm[0].x, lm[idx].y - lm[0].y));
                         const openness = (tipsDist / 4) / handSize;
 
-                        handPositionRef.current = { x: (lm[9].x - 0.5) * 2, y: (lm[9].y - 0.5) * 2 };
+                        // 更新手部位置 (映射到 Three.js 归一化坐标: -1 到 1)
+                        // 注意：MediaPipe 坐标 0,0 是左上角，需要转换
+                        handPositionRef.current = { 
+                            x: (0.5 - lm[9].x) * 2, // 镜像翻转处理
+                            y: (0.5 - lm[9].y) * 2 
+                        };
                         isHandDetectedRef.current = true;
 
-                        if (pinchDist < 0.5) onGestureChange(InteractionMode.FOCUS, true);
+                        if (pinchDist < 0.45) onGestureChange(InteractionMode.FOCUS, true);
                         else if (openness > 2.2) onGestureChange(InteractionMode.SCATTER, true);
                         else onGestureChange(InteractionMode.TREE, true);
                     } else {
@@ -111,17 +108,14 @@
             useEffect(() => {
                 if (isInitializing.current) return;
                 isInitializing.current = true;
-
                 const init = async () => {
                     const wasmDir = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm";
                     const modelUrl = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
                     const vision = await FilesetResolver.forVisionTasks(wasmDir);
-                    
                     landmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
                         baseOptions: { modelAssetPath: modelUrl, delegate: "GPU" },
                         runningMode: "VIDEO", numHands: 1
                     });
-
                     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                     videoRef.current.srcObject = stream;
                     videoRef.current.onloadeddata = () => {
@@ -137,7 +131,7 @@
             return { gestureManager: { isHandDetected: () => isHandDetectedRef.current, getHandPosition: () => handPositionRef.current } };
         };
 
-        // --- Original SceneController (Effects Preserved) ---
+        // --- Original SceneController with Gesture Interaction ---
         class SceneController {
             constructor(container, onModeChangeRequest) {
                 this.onModeChangeRequest = onModeChangeRequest;
@@ -145,10 +139,10 @@
                 this.photoGroup = new THREE.Group();
                 this.clock = new THREE.Clock();
                 this.particles = [];
-                this.dusts = [];
                 this.photos = [];
                 this.instancedMeshes = {};
                 this.dummy = new THREE.Object3D();
+                this.raycaster = new THREE.Raycaster();
                 this.state = { rotation: { x: 0, y: 0 } };
 
                 this.scene = new THREE.Scene();
@@ -170,71 +164,76 @@
                 this.composer.addPass(renderScene);
                 this.composer.addPass(bloomPass);
 
-                this.initSceneObjects();
+                this.initObjects();
             }
 
-            initSceneObjects() {
+            initObjects() {
                 // Lights
-                const ambient = new THREE.AmbientLight(0xccddff, 0.4);
-                this.scene.add(ambient);
-                const innerLight = new THREE.PointLight(CONFIG.colors.iceBlue, 2, 25);
-                innerLight.position.set(0, 5, 0);
-                this.mainGroup.add(innerLight);
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+                const pLight = new THREE.PointLight(0x88ccff, 2, 50);
+                pLight.position.set(0, 10, 10);
+                this.mainGroup.add(pLight);
 
-                // Instanced Particles (Tree)
-                const geo = new THREE.IcosahedronGeometry(0.4, 0);
-                const mat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.iceBlue, metalness: 0.1, roughness: 0.1 });
+                // Particles (Tree)
+                const geo = new THREE.IcosahedronGeometry(0.3, 0);
+                const mat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.iceBlue });
                 const mesh = new THREE.InstancedMesh(geo, mat, CONFIG.particles.count);
                 this.instancedMeshes.CORE = mesh;
                 this.mainGroup.add(mesh);
 
                 for (let i = 0; i < CONFIG.particles.count; i++) {
                     const t = Math.pow(Math.random(), 0.8);
-                    const y = t * CONFIG.particles.treeHeight - 12;
-                    const r = (1 - t) * CONFIG.particles.treeRadius;
+                    const y = t * 24 - 12;
+                    const r = (1 - t) * 8;
                     const angle = t * 50 * Math.PI + Math.random() * Math.PI;
                     const treePos = new THREE.Vector3(Math.cos(angle) * r, y, Math.sin(angle) * r);
-                    
-                    const scatterR = 20 + Math.random() * 20;
-                    const phi = Math.acos(2 * Math.random() - 1);
-                    const theta = Math.random() * Math.PI * 2;
-                    const scatterPos = new THREE.Vector3(scatterR * Math.sin(phi) * Math.cos(theta), scatterR * Math.cos(phi), scatterR * Math.sin(phi) * Math.sin(theta));
-
-                    this.particles.push({ treePos, scatterPos, currentPos: treePos.clone(), scale: 0.5 + Math.random() });
+                    this.particles.push({ treePos, currentPos: treePos.clone(), scale: 0.5 + Math.random() });
                 }
 
-                // Spiral Ribbon
-                const pts = [];
-                for(let i=0; i<=200; i++) {
-                    const t = i/200;
-                    const angle = t * Math.PI * 10;
-                    const r = (1-t) * (CONFIG.particles.treeRadius + 2);
-                    pts.push(new THREE.Vector3(Math.cos(angle)*r, t*24-12, Math.sin(angle)*r));
+                // Add Dummy Photos
+                for (let i = 0; i < 6; i++) {
+                    const photoGeo = new THREE.PlaneGeometry(3, 4);
+                    const photoMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+                    const p = new THREE.Mesh(photoGeo, photoMat);
+                    const angle = (i / 6) * Math.PI * 2;
+                    p.position.set(Math.cos(angle) * 12, (Math.random()-0.5)*10, Math.sin(angle) * 12);
+                    p.lookAt(0, 0, 0);
+                    this.photoGroup.add(p);
+                    this.photos.push({ mesh: p, origPos: p.position.clone() });
                 }
-                const curve = new THREE.CatmullRomCurve3(pts);
-                this.spiralMesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 200, 0.06, 8, false), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 }));
-                this.mainGroup.add(this.spiralMesh);
             }
 
             animate(mode, gm) {
                 const dt = this.clock.getDelta();
-                const targetZ = mode === InteractionMode.SCATTER ? CONFIG.camera.zScatter : CONFIG.camera.z;
-                this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetZ, 0.05);
-
-                if (mode === InteractionMode.SCATTER && gm.isHandDetected()) {
-                    const hP = gm.getHandPosition();
-                    this.state.rotation.y = THREE.MathUtils.lerp(this.state.rotation.y, hP.x * Math.PI, 0.1);
-                    this.state.rotation.x = THREE.MathUtils.lerp(this.state.rotation.x, hP.y * Math.PI * 0.5, 0.1);
-                } else {
-                    this.state.rotation.y += 0.5 * dt;
-                    this.state.rotation.x = THREE.MathUtils.lerp(this.state.rotation.x, 0, 0.05);
+                
+                // --- 手势点击核心逻辑 ---
+                if (mode === InteractionMode.FOCUS && gm.isHandDetected()) {
+                    const handPos = gm.getHandPosition();
+                    // 使用手势位置进行射线检测
+                    this.raycaster.setFromCamera(new THREE.Vector2(handPos.x, handPos.y), this.camera);
+                    const intersects = this.raycaster.intersectObjects(this.photoGroup.children);
+                    
+                    if (intersects.length > 0) {
+                        this.focusTarget = intersects[0].object;
+                    }
                 }
-                this.mainGroup.rotation.set(this.state.rotation.x, this.state.rotation.y, 0);
+
+                // 动画逻辑
+                if (mode === InteractionMode.FOCUS && this.focusTarget) {
+                    this.focusTarget.position.lerp(new THREE.Vector3(0, 0, 35), 0.1);
+                    this.focusTarget.rotation.y += 0.01;
+                } else {
+                    this.photos.forEach(p => {
+                        p.mesh.position.lerp(p.origPos, 0.05);
+                        p.mesh.lookAt(0, 0, 0);
+                    });
+                }
+
+                this.state.rotation.y += 0.5 * dt;
+                this.mainGroup.rotation.y = this.state.rotation.y;
 
                 this.particles.forEach((p, i) => {
-                    const target = mode === InteractionMode.SCATTER ? p.scatterPos : p.treePos;
-                    p.currentPos.lerp(target, 0.1);
-                    this.dummy.position.copy(p.currentPos);
+                    this.dummy.position.copy(p.treePos);
                     this.dummy.scale.setScalar(p.scale);
                     this.dummy.updateMatrix();
                     this.instancedMeshes.CORE.setMatrixAt(i, this.dummy.matrix);
@@ -270,21 +269,23 @@
             }, []);
 
             return (
-                <div className="relative w-screen h-screen overflow-hidden bg-black">
+                <div className="relative w-screen h-screen bg-black">
                     {isLoading && (
                         <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#020210]">
                             <div className="spinner w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full"></div>
-                            <p className="mt-4 text-cyan-300 tracking-widest">LOADING MAGIC...</p>
+                            <p className="mt-4 text-cyan-400">LOADING magic...</p>
                         </div>
                     )}
                     <div ref={containerRef} className="w-full h-full" />
                     <div className="absolute top-10 w-full text-center pointer-events-none">
-                        <h1 className="text-6xl md:text-8xl font-great-vibes text-glow bg-gradient-to-b from-white to-cyan-300 bg-clip-text text-transparent">Frozen Wonderland</h1>
-                        <p className="text-cyan-400 mt-4 tracking-[0.3em] uppercase text-sm">{handDetected ? `Mode: ${mode}` : "Raise your hand to start"}</p>
+                        <h1 className="text-6xl font-great-vibes text-cyan-100 text-glow">Frozen Tree</h1>
+                        <p className="text-cyan-400 mt-2 uppercase tracking-[0.3em]">
+                            {handDetected ? `Mode: ${mode}` : "Raise hand and PINCH to click photos"}
+                        </p>
                     </div>
-                    <div className="absolute bottom-10 right-10 w-48 h-36 border border-cyan-500/30 rounded-lg overflow-hidden bg-black">
-                        <video ref={videoRef} autoPlay playsInline className="hidden"></video>
-                        <canvas id="preview-canvas" ref={canvasRef} className="w-full h-full object-cover"></canvas>
+                    <div className="absolute bottom-5 right-5 w-48 h-36 border-2 border-cyan-500 rounded-lg overflow-hidden bg-black">
+                        <video ref={videoRef} className="hidden" playsInline muted />
+                        <canvas id="preview-canvas" ref={canvasRef} className="w-full h-full object-cover" />
                     </div>
                 </div>
             );
