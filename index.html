@@ -554,6 +554,8 @@
             });
             const photo = new THREE.Mesh(photoGeo, photoMat);
             photo.position.z = 0.04;
+            // THIS IS THE FIX: Rotate the photo plane so its front faces the -Z direction.
+            photo.rotation.y = Math.PI;
 
             const group = new THREE.Group();
             group.add(frame);
@@ -875,8 +877,7 @@
         }
 
         const tempMatrix = new THREE.Matrix4();
-        const rotationY180 = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
-
+        
         function animate() {
             requestAnimationFrame(animate);
             const dt = clock.getDelta();
@@ -957,7 +958,6 @@
                     const targetQuaternion = new THREE.Quaternion();
                     tempMatrix.lookAt(p.mesh.position, lookAtTarget, p.mesh.up);
                     targetQuaternion.setFromRotationMatrix(tempMatrix);
-                    targetQuaternion.multiply(rotationY180); // Apply 180-degree correction
                     p.mesh.quaternion.slerp(targetQuaternion, 2.0 * dt);
                     
                     p.mesh.scale.lerp(new THREE.Vector3(5, 5, 5), 2.0 * dt);
