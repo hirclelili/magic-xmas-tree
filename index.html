@@ -3,16 +3,21 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Frozen Wonderland - Particle Tree</title>
+    <title>Interactive Frozen Christmas Tree - Final Stable</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Great+Vibes&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
 
     <style>
-      body { background-color: #020210; margin: 0; overflow: hidden; }
+      body { background-color: #020210; font-family: 'Cinzel', serif; margin: 0; overflow: hidden; }
+      .font-great-vibes { font-family: 'Great Vibes', cursive; }
+      .text-glow { text-shadow: 0 0 30px rgba(136, 204, 255, 0.8), 0 0 60px rgba(204, 255, 255, 0.4); }
+      .text-glow-hover:hover { text-shadow: 0 0 50px rgba(136, 204, 255, 1.0), 0 0 80px rgba(255, 255, 255, 0.8); }
       .spinner { animation: spin 1s linear infinite; }
-      @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      #preview-container { z-index: 999 !important; }
+      @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 
     <script type="importmap">
@@ -31,192 +36,289 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useRef, useEffect } from 'react';
+        import React, { useState, useRef, useEffect, useCallback } from 'react';
         import ReactDOM from 'react-dom/client';
         import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
         import { FilesetResolver, HandLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
+
+        const CONFIG = {
+            colors: { bg: 0x020210, iceBlue: 0x88ccff, cyan: 0xccffff, white: 0xffffff, silver: 0xaaaaaa, stream: 0xffffff },
+            particles: { count: 1800, dustCount: 2000, treeHeight: 24, treeRadius: 8 },
+            camera: { z: 50, zScatter: 85 },
+            photos: { count: 12 }
+        };
 
         const InteractionMode = { TREE: 'TREE', SCATTER: 'SCATTER', FOCUS: 'FOCUS' };
 
+        // --- MediaPipe Hook ---
+        const useMediaPipe = ({ videoRef, canvasRef, onGestureChange, onLoaded }) => {
+            const handLandmarkerRef = useRef(null);
+            const lastVideoTimeRef = useRef(-1);
+            const animationFrameId = useRef(undefined);
+            const handPositionRef = useRef({ x: 0, y: 0 });
+            const isHandDetectedRef = useRef(false);
+            const confirmedModeRef = useRef(InteractionMode.TREE);
+            const [isInitialized, setIsInitialized] = useState(false);
+
+            const predictWebcam = useCallback(async () => {
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+                const handLandmarker = handLandmarkerRef.current;
+                
+                if (!video || !canvas || !handLandmarker || video.readyState < 2) {
+                    animationFrameId.current = requestAnimationFrame(predictWebcam);
+                    return;
+                }
+
+                if (video.currentTime !== lastVideoTimeRef.current) {
+                    lastVideoTimeRef.current = video.currentTime;
+                    const results = handLandmarker.detectForVideo(video, performance.now());
+                    const ctx = canvas.getContext('2d');
+
+                    if (ctx && video.videoWidth > 0) {
+                        ctx.save();
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.scale(-1, 1);
+                        ctx.translate(-canvas.width, 0);
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        if (results.landmarks) {
+                            const drawingUtils = new DrawingUtils(ctx);
+                            for (const landmarks of results.landmarks) {
+                                drawingUtils.drawLandmarks(landmarks, { color: '#00ffff', lineWidth: 1, radius: 2 });
+                                drawingUtils.drawConnectors(landmarks, HandLandmarker.HAND_CONNECTIONS, { color: '#ccffff', lineWidth: 1 });
+                            }
+                        }
+                        ctx.restore();
+                    }
+
+                    if (results.landmarks && results.landmarks.length > 0) {
+                        isHandDetectedRef.current = true;
+                        const lm = results.landmarks[0];
+                        handPositionRef.current = { x: (lm[9].x - 0.5) * 2, y: (lm[9].y - 0.5) * 2 };
+                        
+                        const wrist = lm[0];
+                        const middleMcp = lm[9];
+                        const handScale = Math.hypot(wrist.x - middleMcp.x, wrist.y - middleMcp.y);
+                        const pinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y) / handScale;
+                        
+                        let tipsDist = 0;
+                        [8, 12, 16, 20].forEach(idx => {
+                            tipsDist += Math.hypot(lm[idx].x - lm[0].x, lm[idx].y - lm[0].y);
+                        });
+                        const openness = (tipsDist / 4) / handScale;
+
+                        if (pinchDist < 0.5) confirmedModeRef.current = InteractionMode.FOCUS;
+                        else if (openness > 2.2) confirmedModeRef.current = InteractionMode.SCATTER;
+                        else confirmedModeRef.current = InteractionMode.TREE;
+                    } else {
+                        isHandDetectedRef.current = false;
+                        confirmedModeRef.current = InteractionMode.TREE;
+                    }
+                    onGestureChange(confirmedModeRef.current, isHandDetectedRef.current);
+                }
+                animationFrameId.current = requestAnimationFrame(predictWebcam);
+            }, [onGestureChange]);
+
+            useEffect(() => {
+                const initialize = async () => {
+                    try {
+                        const wasmPath = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm";
+                        const vision = await FilesetResolver.forVisionTasks(wasmPath);
+                        const modelPath = "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
+                        
+                        handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
+                            baseOptions: { modelAssetPath: modelPath, delegate: "GPU" },
+                            runningMode: "VIDEO", numHands: 1
+                        });
+
+                        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                        if (videoRef.current) {
+                            videoRef.current.srcObject = stream;
+                            videoRef.current.onloadeddata = () => {
+                                if (canvasRef.current) {
+                                    canvasRef.current.width = videoRef.current.videoWidth;
+                                    canvasRef.current.height = videoRef.current.videoHeight;
+                                }
+                                setIsInitialized(true);
+                                onLoaded();
+                            };
+                        }
+                    } catch (e) { console.error("MediaPipe Init Error", e); }
+                };
+                initialize();
+            }, []);
+
+            useEffect(() => {
+                if (isInitialized) animationFrameId.current = requestAnimationFrame(predictWebcam);
+                return () => cancelAnimationFrame(animationFrameId.current);
+            }, [isInitialized, predictWebcam]);
+
+            return { gestureManager: { isHandDetected: () => isHandDetectedRef.current, getHandPosition: () => handPositionRef.current } };
+        };
+
+        // --- Three.js Scene Controller ---
+        class SceneController {
+            constructor(container, onModeChangeRequest) {
+                this.onModeChangeRequest = onModeChangeRequest;
+                this.clock = new THREE.Clock();
+                this.particles = [];
+                this.dusts = [];
+                this.photos = [];
+                this.instancedMeshes = {};
+                this.dummy = new THREE.Object3D();
+                this.state = { rotation: { x: 0, y: 0 } };
+
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(CONFIG.colors.bg);
+                this.camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+                this.camera.position.z = CONFIG.camera.z;
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+                this.renderer.setSize(container.clientWidth, container.clientHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+                container.appendChild(this.renderer.domElement);
+
+                const renderPass = new RenderPass(this.scene, this.camera);
+                const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.4, 0.8, 0.85);
+                this.composer = new EffectComposer(this.renderer);
+                this.composer.addPass(renderPass);
+                this.composer.addPass(bloomPass);
+
+                this.mainGroup = new THREE.Group();
+                this.photoGroup = new THREE.Group();
+                this.scene.add(this.mainGroup);
+                this.mainGroup.add(this.photoGroup);
+
+                this.initScene();
+            }
+
+            initScene() {
+                // Lights
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+                const pLight = new THREE.PointLight(0x88ccff, 2, 50);
+                pLight.position.set(0, 10, 10);
+                this.mainGroup.add(pLight);
+
+                // Particles
+                const geo = new THREE.IcosahedronGeometry(0.3, 0);
+                const mat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.iceBlue, metalness: 0.5, roughness: 0.2 });
+                const iMesh = new THREE.InstancedMesh(geo, mat, CONFIG.particles.count);
+                this.instancedMeshes.CORE = iMesh;
+                this.mainGroup.add(iMesh);
+
+                for (let i = 0; i < CONFIG.particles.count; i++) {
+                    const t = Math.random();
+                    const angle = t * Math.PI * 40;
+                    const radius = (1 - t) * CONFIG.particles.treeRadius;
+                    const y = t * CONFIG.particles.treeHeight - 12;
+                    const treePos = new THREE.Vector3(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+                    
+                    const rS = 20 + Math.random() * 20;
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos(2 * Math.random() - 1);
+                    const scatterPos = new THREE.Vector3(rS * Math.sin(phi) * Math.cos(theta), rS * Math.cos(phi), rS * Math.sin(phi) * Math.sin(theta));
+
+                    this.particles.push({ treePos, scatterPos, currentPos: treePos.clone(), scale: 0.5 + Math.random() });
+                }
+
+                // Star
+                const starPts = [];
+                for (let i = 0; i < 10; i++) {
+                    const r = i % 2 === 0 ? 1.5 : 0.6;
+                    const a = (i / 5) * Math.PI;
+                    starPts.push(new THREE.Vector2(Math.cos(a) * r, Math.sin(a) * r));
+                }
+                const star = new THREE.Mesh(new THREE.ExtrudeGeometry(new THREE.Shape(starPts), { depth: 0.4, bevelEnabled: true }), new THREE.MeshStandardMaterial({ color: 0xfff000, emissive: 0xffaa00 }));
+                star.position.y = 13.5;
+                this.mainGroup.add(star);
+            }
+
+            animate(mode, gm) {
+                const dt = this.clock.getDelta();
+                const targetZ = mode === InteractionMode.SCATTER ? CONFIG.camera.zScatter : CONFIG.camera.z;
+                this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, targetZ, 0.05);
+
+                if (mode === InteractionMode.SCATTER && gm.isHandDetected()) {
+                    const hP = gm.getHandPosition();
+                    this.state.rotation.y = THREE.MathUtils.lerp(this.state.rotation.y, hP.x * Math.PI, 0.1);
+                    this.state.rotation.x = THREE.MathUtils.lerp(this.state.rotation.x, hP.y * Math.PI * 0.5, 0.1);
+                } else {
+                    this.state.rotation.y += 0.5 * dt;
+                    this.state.rotation.x = THREE.MathUtils.lerp(this.state.rotation.x, 0, 0.05);
+                }
+                this.mainGroup.rotation.set(this.state.rotation.x, this.state.rotation.y, 0);
+
+                this.particles.forEach((p, i) => {
+                    const target = mode === InteractionMode.SCATTER ? p.scatterPos : p.treePos;
+                    p.currentPos.lerp(target, 0.08);
+                    this.dummy.position.copy(p.currentPos);
+                    this.dummy.scale.setScalar(p.scale);
+                    this.dummy.updateMatrix();
+                    this.instancedMeshes.CORE.setMatrixAt(i, this.dummy.matrix);
+                });
+                this.instancedMeshes.CORE.instanceMatrix.needsUpdate = true;
+                this.composer.render();
+            }
+
+            resize(w, h) {
+                this.camera.aspect = w / h;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(w, h);
+                this.composer.setSize(w, h);
+            }
+        }
+
+        const useThreeScene = ({ containerRef, mode, gestureManager, onModeChangeRequest }) => {
+            const controllerRef = useRef(null);
+            useEffect(() => {
+                if (!containerRef.current) return;
+                const controller = new SceneController(containerRef.current, onModeChangeRequest);
+                controllerRef.current = controller;
+                const onResize = () => controller.resize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+                window.addEventListener('resize', onResize);
+                
+                const loop = () => {
+                    controller.animate(mode, gestureManager);
+                    requestAnimationFrame(loop);
+                };
+                loop();
+                return () => { window.removeEventListener('resize', onResize); };
+            }, [containerRef, gestureManager, onModeChangeRequest]);
+            return controllerRef.current;
+        };
+
+        // --- Main App Component ---
         const App = () => {
             const [isLoading, setIsLoading] = useState(true);
             const [mode, setMode] = useState(InteractionMode.TREE);
             const [handDetected, setHandDetected] = useState(false);
-            
-            const videoRef = useRef(null);
-            const canvasRef = useRef(null);
+            const vRef = useRef(null);
+            const cRef = useRef(null);
             const containerRef = useRef(null);
-            const handLandmarkerRef = useRef(null);
-            const isInitializing = useRef(false);
-            const particlesRef = useRef([]);
-            const dummy = new THREE.Object3D();
 
-            // 初始化 MediaPipe 手势识别
-            const initMediaPipe = async () => {
-                if (isInitializing.current || handLandmarkerRef.current) return;
-                isInitializing.current = true;
-
-                try {
-                    const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm");
-                    handLandmarkerRef.current = await HandLandmarker.createFromOptions(vision, {
-                        baseOptions: {
-                            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-                            delegate: "GPU"
-                        },
-                        runningMode: "VIDEO",
-                        numHands: 1
-                    });
-
-                    const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
-                    if (videoRef.current) {
-                        videoRef.current.srcObject = stream;
-                        videoRef.current.onloadedmetadata = () => {
-                            videoRef.current.play();
-                            canvasRef.current.width = videoRef.current.videoWidth;
-                            canvasRef.current.height = videoRef.current.videoHeight;
-                            setIsLoading(false);
-                            requestAnimationFrame(predictionLoop);
-                        };
-                    }
-                } catch (e) {
-                    console.error("MediaPipe Error:", e);
-                }
-            };
-
-            const predictionLoop = () => {
-                const video = videoRef.current;
-                const canvas = canvasRef.current;
-                const landmarker = handLandmarkerRef.current;
-
-                if (video && canvas && landmarker && video.readyState >= 2) {
-                    const results = landmarker.detectForVideo(video, performance.now());
-                    const ctx = canvas.getContext('2d');
-                    
-                    ctx.save();
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    ctx.scale(-1, 1);
-                    ctx.translate(-canvas.width, 0);
-                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-                    if (results.landmarks && results.landmarks.length > 0) {
-                        setHandDetected(true);
-                        const lm = results.landmarks[0];
-                        new DrawingUtils(ctx).drawLandmarks(lm, { color: '#00ffff', radius: 2 });
-                        
-                        // 判定手势
-                        const wrist = lm[0];
-                        const middleTip = lm[12];
-                        const thumbTip = lm[4];
-                        const indexTip = lm[8];
-
-                        const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
-                        const handOpenDist = Math.hypot(middleTip.y - wrist.y);
-
-                        if (pinchDist < 0.04) setMode(InteractionMode.FOCUS);
-                        else if (handOpenDist > 0.4) setMode(InteractionMode.SCATTER);
-                        else setMode(InteractionMode.TREE);
-                    } else {
-                        setHandDetected(false);
-                        setMode(InteractionMode.TREE);
-                    }
-                    ctx.restore();
-                }
-                requestAnimationFrame(predictionLoop);
-            };
-
-            // 初始化华丽的粒子圣诞树
-            useEffect(() => {
-                if (!containerRef.current) return;
-                
-                const scene = new THREE.Scene();
-                const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-                const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-                renderer.setSize(window.innerWidth, window.innerHeight);
-                containerRef.current.appendChild(renderer.domElement);
-
-                // 创建粒子群
-                const particleCount = 2000;
-                const geometry = new THREE.IcosahedronGeometry(0.1, 0);
-                const material = new THREE.MeshPhongMaterial({ color: 0x88ccff, emissive: 0x112244 });
-                const instancedMesh = new THREE.InstancedMesh(geometry, material, particleCount);
-                
-                const particles = [];
-                for (let i = 0; i < particleCount; i++) {
-                    const t = Math.random();
-                    const angle = t * Math.PI * 40;
-                    const radius = (1 - t) * 8;
-                    const y = t * 24 - 12;
-
-                    // 树形态位置
-                    const treePos = new THREE.Vector3(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
-                    // 扩散形态位置
-                    const scatterPos = new THREE.Vector3().copy(treePos).multiplyScalar(3 + Math.random() * 2);
-                    
-                    particles.push({ 
-                        current: treePos.clone(), 
-                        tree: treePos, 
-                        scatter: scatterPos,
-                        speed: 0.05 + Math.random() * 0.05 
-                    });
-                }
-                particlesRef.current = particles;
-                scene.add(instancedMesh);
-
-                const light = new THREE.PointLight(0x00ffff, 2, 100);
-                light.position.set(0, 10, 10);
-                scene.add(light, new THREE.AmbientLight(0x202020));
-                camera.position.set(0, 0, 50);
-
-                let currentMode = InteractionMode.TREE;
-                
-                const animate = () => {
-                    requestAnimationFrame(animate);
-                    
-                    // 平滑过渡粒子位置
-                    particlesRef.current.forEach((p, i) => {
-                        const target = mode === InteractionMode.SCATTER ? p.scatter : p.tree;
-                        p.current.lerp(target, 0.05);
-                        
-                        dummy.position.copy(p.current);
-                        dummy.updateMatrix();
-                        instancedMesh.setMatrixAt(i, dummy.matrix);
-                    });
-                    
-                    instancedMesh.instanceMatrix.needsUpdate = true;
-                    instancedMesh.rotation.y += 0.005;
-                    renderer.render(scene, camera);
-                };
-                animate();
-                
-                initMediaPipe();
-
-                return () => {
-                    renderer.dispose();
-                    if (containerRef.current) containerRef.current.innerHTML = '';
-                };
-            }, [mode]); // 当 mode 改变时更新目标
+            const { gestureManager } = useMediaPipe({ videoRef: vRef, canvasRef: cRef, onGestureChange: (m, d) => { setMode(m); setHandDetected(d); }, onLoaded: () => setIsLoading(false) });
+            useThreeScene({ containerRef, mode, gestureManager, onModeChangeRequest: setMode });
 
             return (
-                <div className="relative w-screen h-screen bg-black">
+                <div className="relative w-screen h-screen overflow-hidden bg-[#020210]">
                     {isLoading && (
-                        <div className="absolute inset-0 z-[100] bg-[#020210] flex flex-col items-center justify-center">
+                        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#020210]">
                             <div className="spinner w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full"></div>
-                            <p className="mt-4 text-cyan-400 tracking-widest uppercase">Initializing Wonderland...</p>
+                            <p className="mt-4 text-cyan-300 tracking-widest animate-pulse">Summoning Winter Magic...</p>
                         </div>
                     )}
-
                     <div ref={containerRef} className="w-full h-full" />
-
-                    <div className="absolute top-10 w-full text-center pointer-events-none z-10">
-                        <h1 className="text-6xl font-['Great_Vibes'] text-cyan-100 drop-shadow-[0_0_20px_rgba(0,255,255,0.5)]">Frozen Tree</h1>
-                        <p className="text-cyan-400 mt-2 uppercase tracking-[0.3em] font-['Cinzel']">
-                            {handDetected ? `Status: ${mode}` : "Raise your hand"}
-                        </p>
+                    <div className="absolute top-10 w-full text-center pointer-events-none">
+                        <h1 className="text-6xl md:text-8xl font-great-vibes text-glow bg-gradient-to-b from-white to-cyan-300 bg-clip-text text-transparent">Frozen Wonderland</h1>
+                        <p className="text-cyan-400 mt-4 tracking-[0.3em] uppercase text-sm">{handDetected ? `Magic Mode: ${mode}` : "Raise your hand to start"}</p>
                     </div>
-
-                    <div id="preview-container" className="absolute bottom-5 right-5 w-48 h-36 border-2 border-cyan-500 rounded-lg overflow-hidden bg-black">
-                        <video ref={videoRef} className="hidden" playsInline muted />
-                        <canvas ref={canvasRef} className="w-full h-full object-cover scale-x-[-1]" />
+                    <div className="absolute bottom-10 right-10 w-48 h-36 border border-cyan-500/30 rounded-lg overflow-hidden bg-black/50 backdrop-blur-md">
+                        <video ref={vRef} autoPlay playsInline className="hidden"></video>
+                        <canvas ref={cRef} className="w-full h-full object-cover scale-x-[-1]"></canvas>
                     </div>
                 </div>
             );
