@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Interactive Frozen Christmas Tree",
+  "description": "A 3D interactive Christmas tree inspired by a 'Frozen' theme. Users can interact with the tree using hand gestures to scatter particles, focus on photos, and watch it magically assemble. Features particle physics, photo uploads, and real-time gesture recognition.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

@@ -1,0 +1,52 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interactive Frozen Christmas Tree</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Great+Vibes&display=swap" rel="stylesheet">
+    <style>
+      body {
+        background-color: #020210;
+        font-family: 'Cinzel', serif;
+      }
+      .font-great-vibes {
+        font-family: 'Great Vibes', cursive;
+      }
+      .text-glow {
+        text-shadow: 0 0 30px rgba(136, 204, 255, 0.8), 0 0 60px rgba(204, 255, 255, 0.4);
+      }
+      .text-glow-hover:hover {
+        text-shadow: 0 0 50px rgba(136, 204, 255, 1.0), 0 0 80px rgba(255, 255, 255, 0.8);
+      }
+      .spinner {
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin { 
+        0% { transform: rotate(0deg); } 
+        100% { transform: rotate(360deg); } 
+      }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/+esm",
+    "three/": "https://esm.sh/three@^0.182.0/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/"
+  }
+}
+</script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
