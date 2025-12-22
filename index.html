@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Frozen Tree - Stable Fix</title>
+    <title>Frozen Wonderland - Particle Tree</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Great+Vibes&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/@babel/standalone@7.24.0/babel.min.js"></script>
@@ -12,8 +12,6 @@
       body { background-color: #020210; margin: 0; overflow: hidden; }
       .spinner { animation: spin 1s linear infinite; }
       @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      canvas { display: block; }
-      /* 强制确保预览窗可见 */
       #preview-container { z-index: 999 !important; }
     </style>
 
@@ -33,7 +31,7 @@
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
-        import React, { useState, useRef, useEffect, useCallback } from 'react';
+        import React, { useState, useRef, useEffect } from 'react';
         import ReactDOM from 'react-dom/client';
         import * as THREE from 'three';
         import { FilesetResolver, HandLandmarker, DrawingUtils } from '@mediapipe/tasks-vision';
@@ -45,15 +43,15 @@
             const [mode, setMode] = useState(InteractionMode.TREE);
             const [handDetected, setHandDetected] = useState(false);
             
-            // 使用 Ref 保持实例，避免 Re-render 导致闪现
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
             const containerRef = useRef(null);
             const handLandmarkerRef = useRef(null);
-            const sceneRef = useRef(null);
             const isInitializing = useRef(false);
+            const particlesRef = useRef([]);
+            const dummy = new THREE.Object3D();
 
-            // 初始化 MediaPipe
+            // 初始化 MediaPipe 手势识别
             const initMediaPipe = async () => {
                 if (isInitializing.current || handLandmarkerRef.current) return;
                 isInitializing.current = true;
@@ -81,11 +79,10 @@
                         };
                     }
                 } catch (e) {
-                    console.error("Initialization Failed:", e);
+                    console.error("MediaPipe Error:", e);
                 }
             };
 
-            // 预测循环
             const predictionLoop = () => {
                 const video = videoRef.current;
                 const canvas = canvasRef.current;
@@ -106,10 +103,17 @@
                         const lm = results.landmarks[0];
                         new DrawingUtils(ctx).drawLandmarks(lm, { color: '#00ffff', radius: 2 });
                         
-                        // 逻辑判定
-                        const dist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
-                        if (dist < 0.05) setMode(InteractionMode.FOCUS);
-                        else if (lm[12].y < lm[9].y - 0.1) setMode(InteractionMode.SCATTER);
+                        // 判定手势
+                        const wrist = lm[0];
+                        const middleTip = lm[12];
+                        const thumbTip = lm[4];
+                        const indexTip = lm[8];
+
+                        const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y);
+                        const handOpenDist = Math.hypot(middleTip.y - wrist.y);
+
+                        if (pinchDist < 0.04) setMode(InteractionMode.FOCUS);
+                        else if (handOpenDist > 0.4) setMode(InteractionMode.SCATTER);
                         else setMode(InteractionMode.TREE);
                     } else {
                         setHandDetected(false);
@@ -120,29 +124,66 @@
                 requestAnimationFrame(predictionLoop);
             };
 
-            // 初始化 Three.js
+            // 初始化华丽的粒子圣诞树
             useEffect(() => {
                 if (!containerRef.current) return;
                 
                 const scene = new THREE.Scene();
                 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-                const renderer = new THREE.WebGLRenderer({ antialias: true });
+                const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
                 renderer.setSize(window.innerWidth, window.innerHeight);
                 containerRef.current.appendChild(renderer.domElement);
 
-                const geometry = new THREE.ConeGeometry(5, 20, 32);
-                const material = new THREE.MeshPhongMaterial({ color: 0x88ccff, wireframe: true });
-                const tree = new THREE.Mesh(geometry, material);
-                scene.add(tree);
+                // 创建粒子群
+                const particleCount = 2000;
+                const geometry = new THREE.IcosahedronGeometry(0.1, 0);
+                const material = new THREE.MeshPhongMaterial({ color: 0x88ccff, emissive: 0x112244 });
+                const instancedMesh = new THREE.InstancedMesh(geometry, material, particleCount);
+                
+                const particles = [];
+                for (let i = 0; i < particleCount; i++) {
+                    const t = Math.random();
+                    const angle = t * Math.PI * 40;
+                    const radius = (1 - t) * 8;
+                    const y = t * 24 - 12;
 
-                const light = new THREE.DirectionalLight(0xffffff, 1);
-                light.position.set(5, 5, 5);
-                scene.add(light, new THREE.AmbientLight(0x404040));
-                camera.position.z = 40;
+                    // 树形态位置
+                    const treePos = new THREE.Vector3(Math.cos(angle) * radius, y, Math.sin(angle) * radius);
+                    // 扩散形态位置
+                    const scatterPos = new THREE.Vector3().copy(treePos).multiplyScalar(3 + Math.random() * 2);
+                    
+                    particles.push({ 
+                        current: treePos.clone(), 
+                        tree: treePos, 
+                        scatter: scatterPos,
+                        speed: 0.05 + Math.random() * 0.05 
+                    });
+                }
+                particlesRef.current = particles;
+                scene.add(instancedMesh);
 
+                const light = new THREE.PointLight(0x00ffff, 2, 100);
+                light.position.set(0, 10, 10);
+                scene.add(light, new THREE.AmbientLight(0x202020));
+                camera.position.set(0, 0, 50);
+
+                let currentMode = InteractionMode.TREE;
+                
                 const animate = () => {
                     requestAnimationFrame(animate);
-                    tree.rotation.y += 0.01;
+                    
+                    // 平滑过渡粒子位置
+                    particlesRef.current.forEach((p, i) => {
+                        const target = mode === InteractionMode.SCATTER ? p.scatter : p.tree;
+                        p.current.lerp(target, 0.05);
+                        
+                        dummy.position.copy(p.current);
+                        dummy.updateMatrix();
+                        instancedMesh.setMatrixAt(i, dummy.matrix);
+                    });
+                    
+                    instancedMesh.instanceMatrix.needsUpdate = true;
+                    instancedMesh.rotation.y += 0.005;
                     renderer.render(scene, camera);
                 };
                 animate();
@@ -151,28 +192,29 @@
 
                 return () => {
                     renderer.dispose();
+                    if (containerRef.current) containerRef.current.innerHTML = '';
                 };
-            }, []);
+            }, [mode]); // 当 mode 改变时更新目标
 
             return (
                 <div className="relative w-screen h-screen bg-black">
                     {isLoading && (
                         <div className="absolute inset-0 z-[100] bg-[#020210] flex flex-col items-center justify-center">
                             <div className="spinner w-12 h-12 border-4 border-cyan-500 border-t-transparent rounded-full"></div>
-                            <p className="mt-4 text-cyan-400 tracking-widest animate-pulse">WAKING UP THE MAGIC...</p>
+                            <p className="mt-4 text-cyan-400 tracking-widest uppercase">Initializing Wonderland...</p>
                         </div>
                     )}
 
                     <div ref={containerRef} className="w-full h-full" />
 
                     <div className="absolute top-10 w-full text-center pointer-events-none z-10">
-                        <h1 className="text-6xl font-['Great_Vibes'] text-cyan-100 drop-shadow-2xl">Frozen Tree</h1>
-                        <p className="text-cyan-400 mt-2 uppercase tracking-[0.3em]">
-                            {handDetected ? `Status: ${mode}` : "Show your hand to the camera"}
+                        <h1 className="text-6xl font-['Great_Vibes'] text-cyan-100 drop-shadow-[0_0_20px_rgba(0,255,255,0.5)]">Frozen Tree</h1>
+                        <p className="text-cyan-400 mt-2 uppercase tracking-[0.3em] font-['Cinzel']">
+                            {handDetected ? `Status: ${mode}` : "Raise your hand"}
                         </p>
                     </div>
 
-                    <div id="preview-container" className="absolute bottom-5 right-5 w-48 h-36 border-2 border-cyan-500 rounded-lg overflow-hidden bg-black shadow-[0_0_20px_rgba(0,255,255,0.3)]">
+                    <div id="preview-container" className="absolute bottom-5 right-5 w-48 h-36 border-2 border-cyan-500 rounded-lg overflow-hidden bg-black">
                         <video ref={videoRef} className="hidden" playsInline muted />
                         <canvas ref={canvasRef} className="w-full h-full object-cover scale-x-[-1]" />
                     </div>
