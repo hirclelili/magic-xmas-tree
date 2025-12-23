@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Frozen Winter Wonderland - 12 Photos & Music</title>
+    <title>Christmas Memory for Zeckie&Ariel</title>
     
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -44,7 +44,7 @@
 
         h1 { 
             color: #e0f7fa; 
-            font-size: 80px; 
+            font-size: 52px; /* Further reduced font size */
             margin: 0; 
             font-weight: 400; 
             letter-spacing: 2px; 
@@ -54,6 +54,8 @@
             font-family: 'Great Vibes', cursive;
             opacity: 0.95;
             padding: 0 20px;
+            text-align: center;
+            white-space: nowrap; /* Ensure title stays on one line */
             
             pointer-events: auto; 
             cursor: pointer;
@@ -75,6 +77,23 @@
             background: rgba(2, 2, 16, 0.6);
             backdrop-filter: blur(4px);
             box-shadow: 0 0 10px rgba(136, 204, 255, 0.2);
+        }
+        
+        #gesture-guide {
+            position: absolute;
+            top: 50%;
+            right: 30px;
+            transform: translateY(-50%);
+            z-index: 20;
+            color: rgba(204, 255, 255, 0.6); /* Semi-transparent color */
+            font-family: 'Cinzel', serif;
+            font-size: 12px; /* Reduced font size */
+            letter-spacing: 1px;
+            pointer-events: none;
+        }
+        #gesture-guide p {
+            margin: 10px 0;
+            text-shadow: 0 0 8px rgba(204, 255, 255, 0.5); /* Adjusted shadow for subtlety */
         }
 
         #webcam-wrapper {
@@ -145,7 +164,13 @@
     <div id="canvas-container"></div>
 
     <div id="ui-layer">
-        <h1 onclick="document.getElementById('file-input').click()" title="点击上传照片">Frozen Wonderland</h1>
+        <h1 onclick="document.getElementById('file-input').click()" title="点击上传照片">Christmas Memory for Zeckie&Ariel</h1>
+    </div>
+
+    <div id="gesture-guide">
+        <p>🖐️ 手掌：散开照片</p>
+        <p>✊ 握拳：聚焦照片</p>
+        <p>👌 捏合：回到树上</p>
     </div>
 
     <div id="fullscreen-btn" title="Toggle Fullscreen">
@@ -226,6 +251,99 @@
         let dummy = new THREE.Object3D();
         let hasUserUploadedPhotos = false;
 
+        // --- IndexedDB Manager ---
+        const dbManager = {
+            db: null,
+            dbName: 'ChristmasMemoryDB',
+            photoStoreName: 'photos',
+            musicStoreName: 'music',
+
+            async openDB() {
+                return new Promise((resolve, reject) => {
+                    if (this.db) {
+                        resolve(this.db);
+                        return;
+                    }
+                    const request = indexedDB.open(this.dbName, 2); // Version 2 for new music store
+                    request.onerror = (event) => reject('Error opening IndexedDB');
+                    request.onsuccess = (event) => {
+                        this.db = event.target.result;
+                        resolve(this.db);
+                    };
+                    request.onupgradeneeded = (event) => {
+                        const db = event.target.result;
+                        if (!db.objectStoreNames.contains(this.photoStoreName)) {
+                            const photoStore = db.createObjectStore(this.photoStoreName, { keyPath: 'id', autoIncrement: true });
+                            photoStore.createIndex('timestamp', 'timestamp', { unique: false });
+                        }
+                        if (!db.objectStoreNames.contains(this.musicStoreName)) {
+                            db.createObjectStore(this.musicStoreName, { keyPath: 'id' });
+                        }
+                    };
+                });
+            },
+
+            async addPhoto(blob) {
+                const db = await this.openDB();
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction([this.photoStoreName], 'readwrite');
+                    const store = transaction.objectStore(this.photoStoreName);
+                    const request = store.add({ photoBlob: blob, timestamp: new Date().getTime() });
+                    request.onerror = () => reject('Error adding photo');
+                    request.onsuccess = () => resolve(request.result);
+                });
+            },
+            
+            async getAllPhotos() {
+                const db = await this.openDB();
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction([this.photoStoreName], 'readonly');
+                    const store = transaction.objectStore(this.photoStoreName);
+                    const request = store.getAll();
+                    request.onerror = () => reject('Error getting photos');
+                    request.onsuccess = () => resolve(request.result);
+                });
+            },
+
+            async deletePhotos(ids) {
+                const db = await this.openDB();
+                return new Promise((resolve, reject) => {
+                    const transaction = db.transaction([this.photoStoreName], 'readwrite');
+                    const store = transaction.objectStore(this.photoStoreName);
+                    if (ids.length === 0) return resolve();
+                    let completed = 0;
+                    ids.forEach(id => {
+                        const request = store.delete(id);
+                        request.onsuccess = () => { if (++completed === ids.length) resolve(); };
+                        request.onerror = () => reject('Error deleting photo with id ' + id);
+                    });
+                });
+            },
+
+            async clearPhotos() {
+                const db = await this.openDB();
+                const transaction = db.transaction([this.photoStoreName], 'readwrite');
+                transaction.objectStore(this.photoStoreName).clear();
+            },
+
+            async saveMusic(blob) {
+                const db = await this.openDB();
+                const transaction = db.transaction([this.musicStoreName], 'readwrite');
+                transaction.objectStore(this.musicStoreName).put({ id: 'currentTrack', musicBlob: blob });
+            },
+
+            async getMusic() {
+                const db = await this.openDB();
+                return new Promise((resolve, reject) => {
+                    const request = db.transaction([this.musicStoreName], 'readonly')
+                                      .objectStore(this.musicStoreName)
+                                      .get('currentTrack');
+                    request.onerror = () => reject('Error getting music');
+                    request.onsuccess = () => resolve(request.result ? request.result.musicBlob : null);
+                });
+            }
+        };
+
         async function init() {
             initThree();
             setupEnvironment(); 
@@ -235,13 +353,15 @@
             createInstancedParticles(); 
             createSpiralRibbon(); 
             createInstancedDust(); 
-            createDefaultPhotos(); 
+            
+            await loadPersistentData();
             
             setupPostProcessing(); 
             setupEvents();
             setupUploadHandler(); 
             setupFullscreen(); 
             setupMusicUploader();
+            setupAudioInteraction(); // Add interaction listener for audio playback
             await initMediaPipe();
             
             const loader = document.getElementById('loader');
@@ -411,10 +531,7 @@
             instancedFlake = new THREE.InstancedMesh(flakeGeo, flakeMat, countFlake);
             instancedGlow = new THREE.InstancedMesh(iceGeo, glowMat, countGlow);
 
-            mainGroup.add(instancedIce);
-            mainGroup.add(instancedSnow);
-            mainGroup.add(instancedFlake);
-            mainGroup.add(instancedGlow);
+            mainGroup.add(instancedIce, instancedSnow, instancedFlake, instancedGlow);
 
             let idxIce=0, idxSnow=0, idxFlake=0, idxGlow=0;
 
@@ -447,21 +564,9 @@
                 );
 
                 const s = 0.4 + Math.random() * 0.5;
-                const spinSpeed = new THREE.Vector3(
-                    (Math.random() - 0.5) * 1.5,
-                    (Math.random() - 0.5) * 1.5,
-                    (Math.random() - 0.5) * 1.5
-                );
+                const spinSpeed = new THREE.Vector3((Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5);
 
-                particlesData.push({
-                    type, index, meshRef,
-                    posTree, posScatter,
-                    currentPos: posTree.clone(),
-                    baseScale: s, currentScale: s,
-                    rotation: new THREE.Euler(Math.random()*6, Math.random()*6, Math.random()*6),
-                    spinSpeed,
-                    randomPhase: Math.random() * Math.PI * 2
-                });
+                particlesData.push({ type, index, meshRef, posTree, posScatter, currentPos: posTree.clone(), baseScale: s, currentScale: s, rotation: new THREE.Euler(Math.random()*6, Math.random()*6, Math.random()*6), spinSpeed, randomPhase: Math.random() * Math.PI * 2 });
             }
 
             createTopStar();
@@ -479,15 +584,7 @@
             const starGeo = new THREE.ExtrudeGeometry(starShape, { depth: 0.4, bevelEnabled: true, bevelThickness: 0.1, bevelSize: 0.1, bevelSegments: 3 });
             starGeo.center();
 
-            const starMat = new THREE.MeshPhysicalMaterial({
-                color: CONFIG.colors.cyan,       
-                emissive: 0x87CEFA,              
-                emissiveIntensity: 1.0,          
-                metalness: 0.6, 
-                roughness: 0.1, 
-                transmission: 0.6, 
-                thickness: 2.0
-            });
+            const starMat = new THREE.MeshPhysicalMaterial({ color: CONFIG.colors.cyan, emissive: 0x87CEFA, emissiveIntensity: 1.0, metalness: 0.6, roughness: 0.1, transmission: 0.6, thickness: 2.0 });
 
             const star = new THREE.Mesh(starGeo, starMat);
             star.position.set(0, CONFIG.particles.treeHeight/2 + 1.2, 0);
@@ -500,14 +597,7 @@
 
         function createInstancedDust() {
             const geo = new THREE.PlaneGeometry(0.15, 0.15); 
-            const mat = new THREE.MeshBasicMaterial({ 
-                map: snowflakeTexture, 
-                transparent: true, 
-                opacity: 0.8,
-                side: THREE.DoubleSide,
-                depthWrite: false, 
-                blending: THREE.AdditiveBlending 
-            });
+            const mat = new THREE.MeshBasicMaterial({ map: snowflakeTexture, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending });
             
             instancedDust = new THREE.InstancedMesh(geo, mat, CONFIG.particles.dustCount);
             mainGroup.add(instancedDust);
@@ -516,48 +606,23 @@
                 const rScatter = 15 + Math.random()*25;
                 const theta = Math.random() * Math.PI * 2;
                 const phi = Math.acos(2 * Math.random() - 1);
-                const pos = new THREE.Vector3(
-                    rScatter * Math.sin(phi) * Math.cos(theta),
-                    rScatter * Math.sin(phi) * Math.sin(theta),
-                    rScatter * Math.cos(phi)
-                );
-                
-                dustData.push({
-                    pos: pos,
-                    yOffset: 0,
-                    fallSpeed: 0.5 + Math.random() * 1.5,
-                    scale: 0.5 + Math.random() * 0.8,
-                    rotation: Math.random() * Math.PI,
-                    id: i
-                });
+                const pos = new THREE.Vector3(rScatter * Math.sin(phi) * Math.cos(theta), rScatter * Math.sin(phi) * Math.sin(theta), rScatter * Math.cos(phi) );
+                dustData.push({ pos, yOffset: 0, fallSpeed: 0.5 + Math.random() * 1.5, scale: 0.5 + Math.random() * 0.8, rotation: Math.random() * Math.PI, id: i });
             }
         }
 
-        function addPhotoToScene(texture) {
+        function addPhotoToScene(texture, dbId = null) {
             const frameGeo = new THREE.BoxGeometry(1.3, 1.3, 0.05);
-            const frameMat = new THREE.MeshStandardMaterial({ 
-                color: CONFIG.colors.silver, 
-                metalness: 0.9,    
-                roughness: 0.2,    
-                envMapIntensity: 1.5,
-                emissive: 0x88ccff, 
-                emissiveIntensity: 0.0 
-            });
+            const frameMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.silver, metalness: 0.9, roughness: 0.2, envMapIntensity: 1.5, emissive: 0x88ccff, emissiveIntensity: 0.0 });
             const frame = new THREE.Mesh(frameGeo, frameMat);
 
             const photoGeo = new THREE.PlaneGeometry(1.2, 1.2);
-            const photoMat = new THREE.MeshBasicMaterial({ 
-                map: texture, 
-                side: THREE.DoubleSide, 
-                toneMapped: false, 
-                fog: false 
-            });
+            const photoMat = new THREE.MeshBasicMaterial({ map: texture, color: 0xffffff, side: THREE.DoubleSide, toneMapped: false, fog: false });
             const photo = new THREE.Mesh(photoGeo, photoMat);
             photo.position.z = 0.04;
 
             const group = new THREE.Group();
-            group.add(frame);
-            group.add(photo);
+            group.add(frame, photo);
             
             const s = 0.8;
             group.scale.set(s,s,s);
@@ -575,49 +640,64 @@
             let rScatter = 10 + Math.random() * 12; 
             const theta = Math.random() * Math.PI * 2;
             const phi = Math.acos(2 * Math.random() - 1);
-            const posScatter = new THREE.Vector3(
-                rScatter * Math.sin(phi) * Math.cos(theta),
-                rScatter * Math.sin(phi) * Math.sin(theta),
-                rScatter * Math.cos(phi)
-            );
+            const posScatter = new THREE.Vector3(rScatter * Math.sin(phi) * Math.cos(theta), rScatter * Math.sin(phi) * Math.sin(theta), rScatter * Math.cos(phi));
 
-            photoParticles.push({
-                mesh: group,
-                posTree: posTree,
-                posScatter: posScatter,
-                baseScale: 0.8,
-                spinSpeed: new THREE.Vector3(
-                    (Math.random() - 0.5) * 0.3,
-                    (Math.random() - 0.5) * 0.3,
-                    (Math.random() - 0.5) * 0.3
-                )
-            });
+            photoParticles.push({ mesh: group, dbId, posTree, posScatter, baseScale: 0.8, spinSpeed: new THREE.Vector3((Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3) });
+        }
+
+        async function loadPersistentData() {
+            // Load Photos
+            try {
+                const savedPhotos = await dbManager.getAllPhotos();
+                if (savedPhotos && savedPhotos.length > 0) {
+                    const loader = new THREE.TextureLoader();
+                    savedPhotos.forEach(photoData => {
+                        const url = URL.createObjectURL(photoData.photoBlob);
+                        loader.load(url, (texture) => {
+                            texture.colorSpace = THREE.SRGBColorSpace;
+                            addPhotoToScene(texture, photoData.id);
+                        });
+                    });
+                    hasUserUploadedPhotos = true;
+                } else {
+                    createDefaultPhotos();
+                }
+            } catch (error) {
+                console.error("Failed to load photos from IndexedDB.", error);
+                createDefaultPhotos();
+            }
+
+            // Load Music
+            try {
+                const musicBlob = await dbManager.getMusic();
+                if (musicBlob) {
+                    const audioPlayer = document.getElementById('background-music');
+                    const objectURL = URL.createObjectURL(musicBlob);
+                    audioPlayer.src = objectURL;
+                }
+            } catch (error) {
+                console.error("Failed to load music from IndexedDB.", error);
+            }
         }
 
         function createDefaultPhotos() {
-            // Updated to create 12 fallback photos by default.
-            for (let i = 0; i < 12; i++) {
-                createFallbackPhoto(i + 1);
-            }
+            for (let i = 0; i < 12; i++) createFallbackPhoto(i + 1);
         }
 
         function createFallbackPhoto(index) {
             const canvas = document.createElement('canvas');
             canvas.width = 512; canvas.height = 512;
             const ctx = canvas.getContext('2d');
-            
             ctx.fillStyle = '#222233';
             ctx.fillRect(0,0,512,512);
             ctx.strokeStyle = '#88ccff'; 
             ctx.lineWidth = 15;
             ctx.strokeRect(20,20,472,472);
-            
             ctx.fillStyle = '#ffffff';
             ctx.font = 'bold 50px "Times New Roman"';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillText(`PHOTO ${index}`, 256, 200);
-            
             const texture = new THREE.CanvasTexture(canvas);
             texture.colorSpace = THREE.SRGBColorSpace;
             addPhotoToScene(texture);
@@ -629,20 +709,13 @@
             webcamCtx = webcamCanvas.getContext('2d');
             webcamCanvas.width = 160; webcamCanvas.height = 120;
 
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-            );
-            handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
-                    delegate: "GPU"
-                },
-                runningMode: "VIDEO",
-                numHands: 1
-            });
-            
             try {
-                 if (navigator.mediaDevices?.getUserMedia) {
+                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: { modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`, delegate: "GPU" },
+                    runningMode: "VIDEO", numHands: 1
+                });
+                if (navigator.mediaDevices?.getUserMedia) {
                     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                     video.srcObject = stream;
                     video.addEventListener("loadeddata", predictWebcam);
@@ -656,22 +729,19 @@
         }
 
         let lastVideoTime = -1;
-        async function predictWebcam() {
-            if (video.videoWidth > 0) {
-                 document.getElementById('webcam-wrapper').style.opacity = '1';
+        function predictWebcam() {
+            if (video.readyState < 2) {
+                requestAnimationFrame(predictWebcam);
+                return;
             }
+            if (video.videoWidth > 0) document.getElementById('webcam-wrapper').style.opacity = '1';
+            
             if (video.currentTime !== lastVideoTime) {
                 lastVideoTime = video.currentTime;
                 if (handLandmarker) {
                     const result = handLandmarker.detectForVideo(video, performance.now());
-                    
-                    webcamCtx.save();
                     webcamCtx.clearRect(0, 0, webcamCanvas.width, webcamCanvas.height);
-                    webcamCtx.scale(-1, 1);
-                    webcamCtx.translate(-webcamCanvas.width, 0);
                     webcamCtx.drawImage(video, 0, 0, webcamCanvas.width, webcamCanvas.height);
-                    webcamCtx.restore();
-
                     processGestures(result);
                 }
             }
@@ -691,37 +761,28 @@
                 const wrist = lm[0];
                 const fingertips = [lm[4], lm[8], lm[12], lm[16], lm[20]];
                 const palmCenter = lm[9];
+                
+                // Fist detection (all fingertips close to palm center)
+                let focusDist = fingertips.reduce((sum, tip) => sum + Math.hypot(tip.x - palmCenter.x, tip.y - palmCenter.y), 0) / fingertips.length;
+                
+                // Open palm detection (fingertips far from wrist)
+                const scatterTips = [lm[8], lm[12], lm[16], lm[20]];
+                let scatterDist = scatterTips.reduce((sum, tip) => sum + Math.hypot(tip.x - wrist.x, tip.y - wrist.y), 0) / scatterTips.length;
+                
+                // Pinch detection (thumb and index finger tips close)
+                const pinchDist = Math.hypot(lm[4].x - lm[8].x, lm[4].y - lm[8].y);
 
-                // Gesture for FOCUS: All fingers brought together near the palm center.
-                let focusDist = 0;
-                fingertips.forEach(tip => {
-                    focusDist += Math.hypot(tip.x - palmCenter.x, tip.y - palmCenter.y);
-                });
-                focusDist /= fingertips.length;
-
-                // Gesture for SCATTER: An open hand, fingers spread from the wrist.
-                const scatterTips = [lm[8], lm[12], lm[16], lm[20]]; // 4 main fingers
-                let scatterDist = 0;
-                scatterTips.forEach(tip => {
-                    scatterDist += Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
-                });
-                scatterDist /= scatterTips.length;
-
-                // Determine mode based on gestures
-                if (focusDist < 0.12) { // Threshold for "closed" hand
-                    if (STATE.mode !== 'FOCUS') {
-                        STATE.mode = 'FOCUS';
-                        if (photoParticles.length > 0) {
-                            // Avoid re-selecting if a target is already chosen and animating
-                            if (!STATE.focusTarget) {
-                                STATE.focusTarget = photoParticles[Math.floor(Math.random() * photoParticles.length)].mesh;
-                            }
-                        }
-                    }
-                } else if (scatterDist > 0.4) { // Threshold for "open" hand
+                if (scatterDist > 0.4) {
                     STATE.mode = 'SCATTER';
                     STATE.focusTarget = null;
-                } else { // Default state
+                } else if (focusDist < 0.12) {
+                    if (STATE.mode !== 'FOCUS') {
+                        STATE.mode = 'FOCUS';
+                        if (photoParticles.length > 0 && !STATE.focusTarget) {
+                            STATE.focusTarget = photoParticles[Math.floor(Math.random() * photoParticles.length)].mesh;
+                        }
+                    }
+                } else if (pinchDist < 0.05) {
                     STATE.mode = 'TREE';
                     STATE.focusTarget = null;
                 }
@@ -729,7 +790,7 @@
             } else {
                 warningEl.style.display = 'block';
                 STATE.hand.detected = false;
-                if (STATE.mode !== 'TREE') {
+                if (STATE.mode === 'FOCUS') {
                     STATE.mode = 'TREE';
                     STATE.focusTarget = null;
                 }
@@ -747,132 +808,102 @@
         
         function setupUploadHandler() {
             const fileInput = document.getElementById('file-input');
-            fileInput.addEventListener('change', (e) => {
+            fileInput.addEventListener('change', async (e) => {
                 const files = e.target.files;
                 if (!files || !files.length) return;
-
-                // On the very first user upload, clear the default placeholder photos.
-                if (!hasUserUploadedPhotos) {
-                    // Dispose of old photo assets to prevent memory leaks.
-                    photoParticles.forEach(p => {
-                        if (p.mesh) {
-                            p.mesh.traverse((child) => {
-                                if (child.isMesh) {
-                                    child.geometry.dispose();
-                                    if (child.material.map) child.material.map.dispose();
-                                    child.material.dispose();
-                                }
-                            });
-                            photoMeshGroup.remove(p.mesh);
-                        }
-                    });
-                    photoParticles.length = 0; // Clear the array of photo data.
-                    hasUserUploadedPhotos = true;
-                }
 
                 const loader = new THREE.TextureLoader();
                 const filesToAdd = Array.from(files);
 
-                // Load all selected image files concurrently.
-                const loadPromises = filesToAdd.map(file => {
-                    return new Promise((resolve, reject) => {
-                        const url = URL.createObjectURL(file);
-                        loader.load(url,
-                            (texture) => { // Success
-                                texture.colorSpace = THREE.SRGBColorSpace;
-                                URL.revokeObjectURL(url);
-                                resolve(texture);
-                            },
-                            undefined, // Progress
-                            (err) => { // Error
-                                console.error('Error loading texture:', err);
-                                URL.revokeObjectURL(url);
-                                reject(err);
-                            }
-                        );
-                    });
-                });
-
-                // Once all new images are loaded...
-                Promise.all(loadPromises.map(p => p.catch(e => e))) // Continue even if some images fail
-                    .then(results => {
-                        const validTextures = results.filter(r => r instanceof THREE.Texture);
-                        
-                        // Add a new photo object to the scene for each valid texture.
-                        validTextures.forEach(texture => {
-                            addPhotoToScene(texture);
-                        });
-
-                        // Enforce the 12-photo limit.
-                        if (photoParticles.length > 12) {
-                            const toRemoveCount = photoParticles.length - 12;
-                            // Remove the oldest photos from the beginning of the array.
-                            const removedPhotos = photoParticles.splice(0, toRemoveCount);
-                            
-                            // Clean up the assets of the removed photos.
-                            removedPhotos.forEach(p => {
-                                if (p.mesh) {
-                                    p.mesh.traverse((child) => {
-                                        if (child.isMesh) {
-                                            if (child.geometry) child.geometry.dispose();
-                                            if (child.material) {
-                                                if (child.material.map) child.material.map.dispose();
-                                                child.material.dispose();
-                                            }
-                                        }
-                                    });
-                                    photoMeshGroup.remove(p.mesh);
-                                }
-                            });
+                if (!hasUserUploadedPhotos) {
+                    photoParticles.forEach(p => {
+                        if (p.mesh) {
+                            p.mesh.traverse(o => { if (o.isMesh) { o.geometry.dispose(); if(o.material.map) o.material.map.dispose(); o.material.dispose(); }});
+                            photoMeshGroup.remove(p.mesh);
                         }
                     });
+                    photoParticles.length = 0;
+                    await dbManager.clearPhotos();
+                    hasUserUploadedPhotos = true;
+                }
+
+                for (const file of filesToAdd) {
+                    const blob = new Blob([file], { type: file.type });
+                    const newId = await dbManager.addPhoto(blob);
+                    const url = URL.createObjectURL(blob);
+                    loader.load(url, (texture) => {
+                        texture.colorSpace = THREE.SRGBColorSpace;
+                        addPhotoToScene(texture, newId);
+                    });
+                }
                 
-                // Reset the input so the user can select the same file again if they wish.
+                const allPhotosInDB = await dbManager.getAllPhotos();
+                if (allPhotosInDB.length > 12) {
+                    allPhotosInDB.sort((a, b) => a.timestamp - b.timestamp);
+                    const toRemoveCount = allPhotosInDB.length - 12;
+                    const photosToRemoveFromDB = allPhotosInDB.slice(0, toRemoveCount);
+                    const idsToRemove = photosToRemoveFromDB.map(p => p.id);
+                    
+                    await dbManager.deletePhotos(idsToRemove);
+                    
+                    const sceneParticlesToRemove = photoParticles.filter(p => idsToRemove.includes(p.dbId));
+                    photoParticles = photoParticles.filter(p => !idsToRemove.includes(p.dbId));
+
+                    sceneParticlesToRemove.forEach(p => {
+                        if (p.mesh) {
+                            p.mesh.traverse(o => { if (o.isMesh) { o.geometry.dispose(); if(o.material.map) o.material.map.dispose(); o.material.dispose(); }});
+                            photoMeshGroup.remove(p.mesh);
+                        }
+                    });
+                }
                 e.target.value = '';
             });
         }
 
         function setupFullscreen() {
-            const btn = document.getElementById('fullscreen-btn');
-            btn.addEventListener('click', () => {
-                if (!document.fullscreenElement) {
-                    document.documentElement.requestFullscreen().catch(err => {
-                        console.log(`Error attempting to enable fullscreen: ${err.message}`);
-                    });
-                } else {
-                    if (document.exitFullscreen) {
-                        document.exitFullscreen();
-                    }
-                }
+            document.getElementById('fullscreen-btn').addEventListener('click', () => {
+                if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+                else if (document.exitFullscreen) document.exitFullscreen();
             });
         }
 
         function setupMusicUploader() {
-            const musicBtn = document.getElementById('music-btn');
             const musicInput = document.getElementById('music-input');
             const audioPlayer = document.getElementById('background-music');
 
-            if (musicBtn && musicInput && audioPlayer) {
-                musicBtn.addEventListener('click', () => {
-                    musicInput.click();
-                });
+            document.getElementById('music-btn').addEventListener('click', () => musicInput.click());
 
-                musicInput.addEventListener('change', (event) => {
-                    const files = event.target.files;
-                    if (files && files.length > 0) {
-                        const file = files[0];
-                        const objectURL = URL.createObjectURL(file);
-                        audioPlayer.src = objectURL;
-                        const playPromise = audioPlayer.play();
-                        if (playPromise !== undefined) {
-                            playPromise.catch(error => {
-                                console.error("Audio playback was prevented:", error);
-                            });
-                        }
-                    }
-                });
-            }
+            musicInput.addEventListener('change', async (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    await dbManager.saveMusic(file);
+                    const objectURL = URL.createObjectURL(file);
+                    audioPlayer.src = objectURL;
+                    audioPlayer.play().catch(e => console.error("Audio play failed after upload:", e));
+                }
+            });
         }
+
+        function setupAudioInteraction() {
+            const audioPlayer = document.getElementById('background-music');
+            
+            const playOnFirstInteraction = () => {
+                // Only try to play if a source has been loaded from IndexedDB
+                // and the audio is currently paused.
+                if (audioPlayer.src && audioPlayer.paused) {
+                    const playPromise = audioPlayer.play();
+                    if (playPromise !== undefined) {
+                        playPromise.catch(error => {
+                            console.error("Audio playback failed on user interaction:", error);
+                        });
+                    }
+                }
+            };
+
+            // Listen for the first click/touch anywhere on the page, then remove the listener.
+            document.body.addEventListener('pointerdown', playOnFirstInteraction, { once: true });
+        }
+
 
         const tempMatrix = new THREE.Matrix4();
         const yAxisForPhotoRotation = new THREE.Vector3(0, 1, 0);
@@ -884,7 +915,7 @@
             const time = clock.elapsedTime;
 
             if (spiralMesh) {
-                const targetOpacity = (STATE.mode === 'TREE') ? 0.95 : 0;
+                const targetOpacity = (STATE.mode === 'TREE' || STATE.mode === 'FOCUS') ? 0.95 : 0;
                 spiralMesh.material.opacity = THREE.MathUtils.lerp(spiralMesh.material.opacity, targetOpacity, dt * 3);
                 spiralMesh.visible = spiralMesh.material.opacity > 0.01;
             }
@@ -892,23 +923,20 @@
             const targetCameraZ = (STATE.mode === 'SCATTER') ? CONFIG.camera.zScatter : CONFIG.camera.z;
             camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetCameraZ, dt * 2.0);
 
-            // --- Corrected Rotation Logic ---
             if (STATE.mode === 'FOCUS') {
-                // In FOCUS mode, do not apply any new rotation. The tree will stop spinning.
+                 // No automatic rotation
             } else if (STATE.mode === 'SCATTER' && STATE.hand.detected) {
                 const targetRotY = STATE.hand.x * Math.PI * 0.9;
                 const targetRotX = STATE.hand.y * Math.PI * 0.25;
                 STATE.rotation.y = THREE.MathUtils.lerp(STATE.rotation.y, targetRotY, 3.0 * dt);
                 STATE.rotation.x = THREE.MathUtils.lerp(STATE.rotation.x, targetRotX, 3.0 * dt);
             } else {
-                // Default rotation for TREE mode or SCATTER without hand detection.
                 const baseRotationSpeed = (STATE.mode === 'TREE') ? 0.3 : 0.1;
                 STATE.rotation.y += baseRotationSpeed * dt;
                 STATE.rotation.x = THREE.MathUtils.lerp(STATE.rotation.x, 0, 2.0 * dt);
             }
             mainGroup.rotation.y = STATE.rotation.y;
             mainGroup.rotation.x = STATE.rotation.x;
-
 
             particlesData.forEach(p => {
                 let target = (STATE.mode === 'SCATTER') ? p.posScatter : p.posTree;
@@ -917,26 +945,20 @@
                 if (STATE.mode === 'SCATTER') {
                     const twinkle = 1.0 + Math.sin(time * 10.0 + p.randomPhase) * 0.4;
                     p.currentScale = THREE.MathUtils.lerp(p.currentScale, p.baseScale * twinkle, dt * 10);
-                    p.rotation.x += p.spinSpeed.x * dt * 3.0;
-                    p.rotation.y += p.spinSpeed.y * dt * 3.0;
+                    p.rotation.x += p.spinSpeed.x * dt * 3.0; p.rotation.y += p.spinSpeed.y * dt * 3.0;
                 } else {
                     p.currentScale = THREE.MathUtils.lerp(p.currentScale, p.baseScale, dt * 5);
-                    p.rotation.x += p.spinSpeed.x * dt;
-                    p.rotation.y += p.spinSpeed.y * dt;
+                    p.rotation.x += p.spinSpeed.x * dt; p.rotation.y += p.spinSpeed.y * dt;
                 }
 
                 dummy.position.copy(p.currentPos);
                 dummy.rotation.copy(p.rotation);
                 dummy.scale.setScalar(p.currentScale);
                 dummy.updateMatrix();
-
                 p.meshRef.setMatrixAt(p.index, dummy.matrix);
             });
 
-            instancedIce.instanceMatrix.needsUpdate = true;
-            instancedSnow.instanceMatrix.needsUpdate = true;
-            instancedFlake.instanceMatrix.needsUpdate = true;
-            instancedGlow.instanceMatrix.needsUpdate = true;
+            [instancedIce, instancedSnow, instancedFlake, instancedGlow].forEach(m => m.instanceMatrix.needsUpdate = true);
 
             const lookAtTarget = new THREE.Vector3();
             camera.getWorldPosition(lookAtTarget);
@@ -947,39 +969,25 @@
                 const frameMesh = p.mesh.children[0];
                 if (STATE.mode === 'FOCUS' && p.mesh === STATE.focusTarget) {
                     frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.8, 5.0 * dt);
-                    
-                    const targetPos = new THREE.Vector3(0, 1.5, camera.position.z - 15);
-                    const invGroupMatrix = new THREE.Matrix4().copy(mainGroup.matrixWorld).invert();
-                    targetPos.applyMatrix4(invGroupMatrix);
-
+                    const targetPos = new THREE.Vector3(0, 1.5, camera.position.z - 15).applyMatrix4(invMatrix);
                     p.mesh.position.lerp(targetPos, 2.0 * dt);
 
-                    // Corrected rotation logic
                     const targetQuaternion = new THREE.Quaternion();
                     tempMatrix.lookAt(p.mesh.position, lookAtTarget, p.mesh.up);
-                    targetQuaternion.setFromRotationMatrix(tempMatrix);
-
-                    // NEW GUARANTEED FIX: Apply 180-degree correction to the final orientation
-                    targetQuaternion.multiply(correctionQuaternion);
-
+                    targetQuaternion.setFromRotationMatrix(tempMatrix).multiply(correctionQuaternion);
                     p.mesh.quaternion.slerp(targetQuaternion, 2.0 * dt);
-                    
                     p.mesh.scale.lerp(new THREE.Vector3(5, 5, 5), 2.0 * dt);
-
                 } else {
-                    // Animate photos back to their default state.
                     frameMesh.material.emissiveIntensity = THREE.MathUtils.lerp(frameMesh.material.emissiveIntensity, 0.0, 5.0 * dt);
                     const target = (STATE.mode === 'TREE' || STATE.mode === 'FOCUS') ? p.posTree : p.posScatter;
                     p.mesh.position.lerp(target, 2.0 * dt);
                     
                     if (STATE.mode === 'SCATTER') {
-                        p.mesh.rotation.x += p.spinSpeed.x * dt;
-                        p.mesh.rotation.y += p.spinSpeed.y * dt;
+                        p.mesh.rotation.x += p.spinSpeed.x * dt; p.mesh.rotation.y += p.spinSpeed.y * dt;
                     } else {
                          p.mesh.quaternion.slerp(new THREE.Quaternion(0,0,0,1), 2.0 * dt);
                     }
-                    
-                    const s = (STATE.mode === 'SCATTER') ? 1.5 : p.baseScale;
+                    const s = (STATE.mode === 'SCATTER') ? 3.0 : p.baseScale;
                     p.mesh.scale.lerp(new THREE.Vector3(s,s,s), 4.0 * dt);
                 }
             });
@@ -988,13 +996,8 @@
                 d.yOffset -= d.fallSpeed * dt;
                 const boundary = CONFIG.particles.treeHeight * 1.5;
                 if (d.yOffset < -boundary) d.yOffset = boundary;
-
-                const x = d.pos.x + Math.sin(time + d.id) * 0.05;
-                const z = d.pos.z + Math.cos(time + d.id) * 0.05;
-                const y = d.pos.y + d.yOffset;
+                dummy.position.set(d.pos.x + Math.sin(time + d.id) * 0.05, d.pos.y + d.yOffset, d.pos.z + Math.cos(time + d.id) * 0.05);
                 d.rotation += dt * 0.5;
-
-                dummy.position.set(x, y, z);
                 dummy.rotation.set(0, 0, d.rotation);
                 dummy.scale.setScalar(d.scale);
                 dummy.updateMatrix();
@@ -1009,4 +1012,3 @@
     </script>
 </body>
 </html>
-```
