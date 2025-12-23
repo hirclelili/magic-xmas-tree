@@ -134,11 +134,20 @@
         #fullscreen-btn svg, #music-btn svg {
             fill: #ccffff;
             filter: drop-shadow(0 0 2px rgba(204, 255, 255, 0.5));
+            transition: fill 0.3s ease;
         }
         #fullscreen-btn { right: 80px; }
         #music-btn { right: 30px; }
         #fullscreen-btn svg { width: 24px; height: 24px; }
         #music-btn svg { width: 20px; height: 20px; }
+
+        #music-btn.playing {
+            border-color: #00ffff;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.7);
+        }
+        #music-btn.playing svg {
+            fill: #00ffff;
+        }
     </style>
 
     <script type="importmap">
@@ -186,7 +195,7 @@
     </div>
 
     <input type="file" id="music-input" accept="audio/*" style="display: none;">
-    <audio id="background-music" loop></audio>
+    <audio id="background-music" loop preload="auto"></audio>
 
     <input type="file" id="file-input" multiple accept="image/*" style="display: none;">
 
@@ -886,6 +895,7 @@
 
         function setupAudioInteraction() {
             const audioPlayer = document.getElementById('background-music');
+            const musicBtn = document.getElementById('music-btn');
             
             const playOnFirstInteraction = () => {
                 // Only try to play if a source has been loaded from IndexedDB
@@ -902,6 +912,15 @@
 
             // Listen for the first click/touch anywhere on the page, then remove the listener.
             document.body.addEventListener('pointerdown', playOnFirstInteraction, { once: true });
+
+            // Sync UI icon with play/pause state
+            audioPlayer.addEventListener('play', () => {
+                musicBtn.classList.add('playing');
+            });
+
+            audioPlayer.addEventListener('pause', () => {
+                musicBtn.classList.remove('playing');
+            });
         }
 
 
@@ -1012,3 +1031,4 @@
     </script>
 </body>
 </html>
+```
