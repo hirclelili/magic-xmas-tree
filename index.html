@@ -44,7 +44,7 @@
 
         h1 { 
             color: #e0f7fa; 
-            font-size: 52px; /* Further reduced font size */
+            font-size: 52px;
             margin: 0; 
             font-weight: 400; 
             letter-spacing: 2px; 
@@ -55,10 +55,10 @@
             opacity: 0.95;
             padding: 0 20px;
             text-align: center;
-            white-space: nowrap; /* Ensure title stays on one line */
+            white-space: nowrap;
             
             pointer-events: auto; 
-            cursor: pointer;
+            cursor: default; /* Changed cursor as it's not a button anymore */
             transition: opacity 0.3s, text-shadow 0.3s;
         }
         
@@ -85,15 +85,15 @@
             right: 30px;
             transform: translateY(-50%);
             z-index: 20;
-            color: rgba(204, 255, 255, 0.6); /* Semi-transparent color */
+            color: rgba(204, 255, 255, 0.6);
             font-family: 'Cinzel', serif;
-            font-size: 12px; /* Reduced font size */
+            font-size: 12px;
             letter-spacing: 1px;
             pointer-events: none;
         }
         #gesture-guide p {
             margin: 10px 0;
-            text-shadow: 0 0 8px rgba(204, 255, 255, 0.5); /* Adjusted shadow for subtlety */
+            text-shadow: 0 0 8px rgba(204, 255, 255, 0.5);
         }
 
         #webcam-wrapper {
@@ -110,7 +110,7 @@
              transform: scaleX(-1);
         }
 
-        #fullscreen-btn, #music-btn {
+        #fullscreen-btn {
             position: absolute;
             bottom: 30px;
             width: 40px;
@@ -125,28 +125,19 @@
             justify-content: center;
             transition: all 0.3s ease;
             backdrop-filter: blur(4px);
+            right: 30px; /* Repositioned fullscreen button */
         }
-        #fullscreen-btn:hover, #music-btn:hover {
+        #fullscreen-btn:hover {
             background: rgba(136, 204, 255, 0.2);
             border-color: #88ccff;
             box-shadow: 0 0 10px rgba(136, 204, 255, 0.3);
         }
-        #fullscreen-btn svg, #music-btn svg {
+        #fullscreen-btn svg {
             fill: #ccffff;
             filter: drop-shadow(0 0 2px rgba(204, 255, 255, 0.5));
             transition: fill 0.3s ease;
-        }
-        #fullscreen-btn { right: 80px; }
-        #music-btn { right: 30px; }
-        #fullscreen-btn svg { width: 24px; height: 24px; }
-        #music-btn svg { width: 20px; height: 20px; }
-
-        #music-btn.playing {
-            border-color: #00ffff;
-            box-shadow: 0 0 15px rgba(0, 255, 255, 0.7);
-        }
-        #music-btn.playing svg {
-            fill: #00ffff;
+            width: 24px;
+            height: 24px;
         }
     </style>
 
@@ -173,7 +164,7 @@
     <div id="canvas-container"></div>
 
     <div id="ui-layer">
-        <h1 onclick="document.getElementById('file-input').click()" title="点击上传照片">Christmas Memory for Zeckie&Ariel</h1>
+        <h1 title="Christmas Memory">Christmas Memory for Zeckie&Ariel</h1>
     </div>
 
     <div id="gesture-guide">
@@ -188,16 +179,7 @@
         </svg>
     </div>
 
-    <div id="music-btn" title="Upload Music">
-        <svg viewBox="0 0 24 24">
-            <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
-        </svg>
-    </div>
-
-    <input type="file" id="music-input" accept="audio/*" style="display: none;">
     <audio id="background-music" loop preload="auto"></audio>
-
-    <input type="file" id="file-input" multiple accept="image/*" style="display: none;">
 
     <div id="webcam-wrapper">
         <video id="webcam" autoplay playsinline style="display:none;"></video>
@@ -258,100 +240,6 @@
 
         let instancedIce, instancedSnow, instancedFlake, instancedGlow, instancedDust;
         let dummy = new THREE.Object3D();
-        let hasUserUploadedPhotos = false;
-
-        // --- IndexedDB Manager ---
-        const dbManager = {
-            db: null,
-            dbName: 'ChristmasMemoryDB',
-            photoStoreName: 'photos',
-            musicStoreName: 'music',
-
-            async openDB() {
-                return new Promise((resolve, reject) => {
-                    if (this.db) {
-                        resolve(this.db);
-                        return;
-                    }
-                    const request = indexedDB.open(this.dbName, 2); // Version 2 for new music store
-                    request.onerror = (event) => reject('Error opening IndexedDB');
-                    request.onsuccess = (event) => {
-                        this.db = event.target.result;
-                        resolve(this.db);
-                    };
-                    request.onupgradeneeded = (event) => {
-                        const db = event.target.result;
-                        if (!db.objectStoreNames.contains(this.photoStoreName)) {
-                            const photoStore = db.createObjectStore(this.photoStoreName, { keyPath: 'id', autoIncrement: true });
-                            photoStore.createIndex('timestamp', 'timestamp', { unique: false });
-                        }
-                        if (!db.objectStoreNames.contains(this.musicStoreName)) {
-                            db.createObjectStore(this.musicStoreName, { keyPath: 'id' });
-                        }
-                    };
-                });
-            },
-
-            async addPhoto(blob) {
-                const db = await this.openDB();
-                return new Promise((resolve, reject) => {
-                    const transaction = db.transaction([this.photoStoreName], 'readwrite');
-                    const store = transaction.objectStore(this.photoStoreName);
-                    const request = store.add({ photoBlob: blob, timestamp: new Date().getTime() });
-                    request.onerror = () => reject('Error adding photo');
-                    request.onsuccess = () => resolve(request.result);
-                });
-            },
-            
-            async getAllPhotos() {
-                const db = await this.openDB();
-                return new Promise((resolve, reject) => {
-                    const transaction = db.transaction([this.photoStoreName], 'readonly');
-                    const store = transaction.objectStore(this.photoStoreName);
-                    const request = store.getAll();
-                    request.onerror = () => reject('Error getting photos');
-                    request.onsuccess = () => resolve(request.result);
-                });
-            },
-
-            async deletePhotos(ids) {
-                const db = await this.openDB();
-                return new Promise((resolve, reject) => {
-                    const transaction = db.transaction([this.photoStoreName], 'readwrite');
-                    const store = transaction.objectStore(this.photoStoreName);
-                    if (ids.length === 0) return resolve();
-                    let completed = 0;
-                    ids.forEach(id => {
-                        const request = store.delete(id);
-                        request.onsuccess = () => { if (++completed === ids.length) resolve(); };
-                        request.onerror = () => reject('Error deleting photo with id ' + id);
-                    });
-                });
-            },
-
-            async clearPhotos() {
-                const db = await this.openDB();
-                const transaction = db.transaction([this.photoStoreName], 'readwrite');
-                transaction.objectStore(this.photoStoreName).clear();
-            },
-
-            async saveMusic(blob) {
-                const db = await this.openDB();
-                const transaction = db.transaction([this.musicStoreName], 'readwrite');
-                transaction.objectStore(this.musicStoreName).put({ id: 'currentTrack', musicBlob: blob });
-            },
-
-            async getMusic() {
-                const db = await this.openDB();
-                return new Promise((resolve, reject) => {
-                    const request = db.transaction([this.musicStoreName], 'readonly')
-                                      .objectStore(this.musicStoreName)
-                                      .get('currentTrack');
-                    request.onerror = () => reject('Error getting music');
-                    request.onsuccess = () => resolve(request.result ? request.result.musicBlob : null);
-                });
-            }
-        };
 
         async function init() {
             initThree();
@@ -363,14 +251,12 @@
             createSpiralRibbon(); 
             createInstancedDust(); 
             
-            await loadPersistentData();
+            loadStaticAssets();
             
             setupPostProcessing(); 
             setupEvents();
-            setupUploadHandler(); 
             setupFullscreen(); 
-            setupMusicUploader();
-            setupAudioInteraction(); // Add interaction listener for audio playback
+            setupAudioInteraction();
             await initMediaPipe();
             
             const loader = document.getElementById('loader');
@@ -620,7 +506,7 @@
             }
         }
 
-        function addPhotoToScene(texture, dbId = null) {
+        function addPhotoToScene(texture) {
             const frameGeo = new THREE.BoxGeometry(1.3, 1.3, 0.05);
             const frameMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.silver, metalness: 0.9, roughness: 0.2, envMapIntensity: 1.5, emissive: 0x88ccff, emissiveIntensity: 0.0 });
             const frame = new THREE.Mesh(frameGeo, frameMat);
@@ -651,46 +537,31 @@
             const phi = Math.acos(2 * Math.random() - 1);
             const posScatter = new THREE.Vector3(rScatter * Math.sin(phi) * Math.cos(theta), rScatter * Math.sin(phi) * Math.sin(theta), rScatter * Math.cos(phi));
 
-            photoParticles.push({ mesh: group, dbId, posTree, posScatter, baseScale: 0.8, spinSpeed: new THREE.Vector3((Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3) });
+            photoParticles.push({ mesh: group, posTree, posScatter, baseScale: 0.8, spinSpeed: new THREE.Vector3((Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3, (Math.random() - 0.5) * 0.3) });
         }
 
-        async function loadPersistentData() {
-            // Load Photos
-            try {
-                const savedPhotos = await dbManager.getAllPhotos();
-                if (savedPhotos && savedPhotos.length > 0) {
-                    const loader = new THREE.TextureLoader();
-                    savedPhotos.forEach(photoData => {
-                        const url = URL.createObjectURL(photoData.photoBlob);
-                        loader.load(url, (texture) => {
-                            texture.colorSpace = THREE.SRGBColorSpace;
-                            addPhotoToScene(texture, photoData.id);
-                        });
-                    });
-                    hasUserUploadedPhotos = true;
-                } else {
-                    createDefaultPhotos();
-                }
-            } catch (error) {
-                console.error("Failed to load photos from IndexedDB.", error);
-                createDefaultPhotos();
+        function loadStaticAssets() {
+            // Load static photos
+            const loader = new THREE.TextureLoader();
+            for (let i = 1; i <= 12; i++) {
+                const imageUrl = `images/${i}.jpg`;
+                loader.load(
+                    imageUrl,
+                    (texture) => {
+                        texture.colorSpace = THREE.SRGBColorSpace;
+                        addPhotoToScene(texture);
+                    },
+                    undefined,
+                    (err) => {
+                        console.error(`Could not load image ${imageUrl}`, err);
+                        createFallbackPhoto(i);
+                    }
+                );
             }
 
-            // Load Music
-            try {
-                const musicBlob = await dbManager.getMusic();
-                if (musicBlob) {
-                    const audioPlayer = document.getElementById('background-music');
-                    const objectURL = URL.createObjectURL(musicBlob);
-                    audioPlayer.src = objectURL;
-                }
-            } catch (error) {
-                console.error("Failed to load music from IndexedDB.", error);
-            }
-        }
-
-        function createDefaultPhotos() {
-            for (let i = 0; i < 12; i++) createFallbackPhoto(i + 1);
+            // Load static music
+            const audioPlayer = document.getElementById('background-music');
+            audioPlayer.src = 'music/bgm.mp3';
         }
 
         function createFallbackPhoto(index) {
@@ -815,60 +686,6 @@
             });
         }
         
-        function setupUploadHandler() {
-            const fileInput = document.getElementById('file-input');
-            fileInput.addEventListener('change', async (e) => {
-                const files = e.target.files;
-                if (!files || !files.length) return;
-
-                const loader = new THREE.TextureLoader();
-                const filesToAdd = Array.from(files);
-
-                if (!hasUserUploadedPhotos) {
-                    photoParticles.forEach(p => {
-                        if (p.mesh) {
-                            p.mesh.traverse(o => { if (o.isMesh) { o.geometry.dispose(); if(o.material.map) o.material.map.dispose(); o.material.dispose(); }});
-                            photoMeshGroup.remove(p.mesh);
-                        }
-                    });
-                    photoParticles.length = 0;
-                    await dbManager.clearPhotos();
-                    hasUserUploadedPhotos = true;
-                }
-
-                for (const file of filesToAdd) {
-                    const blob = new Blob([file], { type: file.type });
-                    const newId = await dbManager.addPhoto(blob);
-                    const url = URL.createObjectURL(blob);
-                    loader.load(url, (texture) => {
-                        texture.colorSpace = THREE.SRGBColorSpace;
-                        addPhotoToScene(texture, newId);
-                    });
-                }
-                
-                const allPhotosInDB = await dbManager.getAllPhotos();
-                if (allPhotosInDB.length > 12) {
-                    allPhotosInDB.sort((a, b) => a.timestamp - b.timestamp);
-                    const toRemoveCount = allPhotosInDB.length - 12;
-                    const photosToRemoveFromDB = allPhotosInDB.slice(0, toRemoveCount);
-                    const idsToRemove = photosToRemoveFromDB.map(p => p.id);
-                    
-                    await dbManager.deletePhotos(idsToRemove);
-                    
-                    const sceneParticlesToRemove = photoParticles.filter(p => idsToRemove.includes(p.dbId));
-                    photoParticles = photoParticles.filter(p => !idsToRemove.includes(p.dbId));
-
-                    sceneParticlesToRemove.forEach(p => {
-                        if (p.mesh) {
-                            p.mesh.traverse(o => { if (o.isMesh) { o.geometry.dispose(); if(o.material.map) o.material.map.dispose(); o.material.dispose(); }});
-                            photoMeshGroup.remove(p.mesh);
-                        }
-                    });
-                }
-                e.target.value = '';
-            });
-        }
-
         function setupFullscreen() {
             document.getElementById('fullscreen-btn').addEventListener('click', () => {
                 if (!document.fullscreenElement) document.documentElement.requestFullscreen();
@@ -876,30 +693,10 @@
             });
         }
 
-        function setupMusicUploader() {
-            const musicInput = document.getElementById('music-input');
-            const audioPlayer = document.getElementById('background-music');
-
-            document.getElementById('music-btn').addEventListener('click', () => musicInput.click());
-
-            musicInput.addEventListener('change', async (event) => {
-                const file = event.target.files[0];
-                if (file) {
-                    await dbManager.saveMusic(file);
-                    const objectURL = URL.createObjectURL(file);
-                    audioPlayer.src = objectURL;
-                    audioPlayer.play().catch(e => console.error("Audio play failed after upload:", e));
-                }
-            });
-        }
-
         function setupAudioInteraction() {
             const audioPlayer = document.getElementById('background-music');
-            const musicBtn = document.getElementById('music-btn');
             
             const playOnFirstInteraction = () => {
-                // Only try to play if a source has been loaded from IndexedDB
-                // and the audio is currently paused.
                 if (audioPlayer.src && audioPlayer.paused) {
                     const playPromise = audioPlayer.play();
                     if (playPromise !== undefined) {
@@ -910,17 +707,7 @@
                 }
             };
 
-            // Listen for the first click/touch anywhere on the page, then remove the listener.
             document.body.addEventListener('pointerdown', playOnFirstInteraction, { once: true });
-
-            // Sync UI icon with play/pause state
-            audioPlayer.addEventListener('play', () => {
-                musicBtn.classList.add('playing');
-            });
-
-            audioPlayer.addEventListener('pause', () => {
-                musicBtn.classList.remove('playing');
-            });
         }
 
 
@@ -1006,7 +793,7 @@
                     } else {
                          p.mesh.quaternion.slerp(new THREE.Quaternion(0,0,0,1), 2.0 * dt);
                     }
-                    const s = (STATE.mode === 'SCATTER') ? 3.0 : p.baseScale;
+                    const s = (STATE.mode === 'SCATTER') ? p.baseScale * 3 : p.baseScale;
                     p.mesh.scale.lerp(new THREE.Vector3(s,s,s), 4.0 * dt);
                 }
             });
@@ -1031,4 +818,3 @@
     </script>
 </body>
 </html>
-```
