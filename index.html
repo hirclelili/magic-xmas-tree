@@ -44,7 +44,7 @@
 
         h1 { 
             color: #e0f7fa; 
-            font-size: 52px;
+            font-size: clamp(32px, 8vw, 52px); /* Responsive font size */
             margin: 0; 
             font-weight: 400; 
             letter-spacing: 2px; 
@@ -138,6 +138,28 @@
             transition: fill 0.3s ease;
             width: 24px;
             height: 24px;
+        }
+
+        /* --- Mobile Optimizations --- */
+        @media (max-width: 768px) {
+            #gesture-guide {
+                /* Move to bottom center on mobile */
+                top: auto;
+                bottom: 80px; /* Position above the fullscreen button */
+                right: 0;
+                left: 0;
+                transform: none;
+                width: 100%;
+                display: flex;
+                flex-direction: row;
+                justify-content: center;
+                align-items: center;
+                font-size: 10px;
+            }
+
+            #gesture-guide p {
+                margin: 0 12px; /* Horizontal spacing between items */
+            }
         }
     </style>
 
@@ -818,3 +840,4 @@
     </script>
 </body>
 </html>
+```
