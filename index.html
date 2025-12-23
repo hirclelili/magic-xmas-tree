@@ -44,7 +44,7 @@
 
         h1 { 
             color: #e0f7fa; 
-            font-size: clamp(32px, 8vw, 52px); /* Responsive font size */
+            font-size: clamp(32px, 8vw, 52px); /* Responsive font size for desktop */
             margin: 0; 
             font-weight: 400; 
             letter-spacing: 2px; 
@@ -58,7 +58,7 @@
             white-space: nowrap;
             
             pointer-events: auto; 
-            cursor: default; /* Changed cursor as it's not a button anymore */
+            cursor: default;
             transition: opacity 0.3s, text-shadow 0.3s;
         }
         
@@ -125,7 +125,7 @@
             justify-content: center;
             transition: all 0.3s ease;
             backdrop-filter: blur(4px);
-            right: 30px; /* Repositioned fullscreen button */
+            right: 30px;
         }
         #fullscreen-btn:hover {
             background: rgba(136, 204, 255, 0.2);
@@ -142,10 +142,14 @@
 
         /* --- Mobile Optimizations --- */
         @media (max-width: 768px) {
+            h1 {
+                font-size: 24px; /* Finetuned title size for mobile */
+            }
+
             #gesture-guide {
                 /* Move to bottom center on mobile */
                 top: auto;
-                bottom: 80px; /* Position above the fullscreen button */
+                bottom: 100px; /* Positioned higher to avoid overlap with buttons */
                 right: 0;
                 left: 0;
                 transform: none;
@@ -840,4 +844,3 @@
     </script>
 </body>
 </html>
-```
