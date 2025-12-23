@@ -21,6 +21,7 @@
             align-items: center;
             padding-top: 40px;
             box-sizing: border-box;
+            transition: padding-top 0.3s ease;
         }
         
         #loader {
@@ -77,6 +78,7 @@
             background: rgba(2, 2, 16, 0.6);
             backdrop-filter: blur(4px);
             box-shadow: 0 0 10px rgba(136, 204, 255, 0.2);
+            transition: all 0.3s ease;
         }
         
         #gesture-guide {
@@ -142,14 +144,29 @@
 
         /* --- Mobile Optimizations --- */
         @media (max-width: 768px) {
+            #ui-layer {
+                padding-top: 20px; /* Reduced top padding to lift title */
+            }
+            
             h1 {
                 font-size: 24px; /* Finetuned title size for mobile */
             }
 
+            #hand-warning {
+                /* Center warning below title */
+                top: 60px; 
+                left: 50%;
+                transform: translateX(-50%);
+                width: auto;
+                white-space: nowrap;
+                font-size: 12px;
+                padding: 6px 10px;
+            }
+
             #gesture-guide {
-                /* Move to bottom center on mobile */
+                /* Move to the absolute bottom */
                 top: auto;
-                bottom: 100px; /* Positioned higher to avoid overlap with buttons */
+                bottom: 20px; 
                 right: 0;
                 left: 0;
                 transform: none;
@@ -158,11 +175,16 @@
                 flex-direction: row;
                 justify-content: center;
                 align-items: center;
-                font-size: 10px;
+                font-size: 9px; /* Make text even more subtle */
+                color: rgba(204, 255, 255, 0.4);
             }
 
             #gesture-guide p {
-                margin: 0 12px; /* Horizontal spacing between items */
+                margin: 0 10px; /* Horizontal spacing */
+            }
+
+            #fullscreen-btn {
+                display: none; /* Hide fullscreen button on mobile */
             }
         }
     </style>
@@ -190,7 +212,7 @@
     <div id="canvas-container"></div>
 
     <div id="ui-layer">
-        <h1 title="Christmas Memory">Christmas Memory for Zeckie&Ariel</h1>
+        <h1 title="Christmas Memory">Christmas for Zeckie & Ariel</h1>
     </div>
 
     <div id="gesture-guide">
